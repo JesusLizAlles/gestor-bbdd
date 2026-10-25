@@ -1,0 +1,117 @@
+import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
+import type { Engine } from '@shared/types'
+import { languageFor, monaco, registerCompletion } from '../lib/monaco'
+
+export interface EditorCommands {
+  /** Sentencia bajo el cursor (o selección). */
+  runCurrent: (text: string, selection: boolean, cursorOffset: number) => void
+  /** Script completo. */
+  runAll: (text: string) => void
+}
+
+export interface SqlEditorHandle {
+  /** Añade una sentencia al final, separada por una línea en blanco, conservando el deshacer. */
+  appendStatement: (statement: string) => void
+  /** Lo mismo que Ctrl+Enter: sentencia bajo el cursor o selección. */
+  runCurrent: () => void
+  runAll: () => void
+}
+
+interface Props {
+  engine: Engine
+  /** Texto inicial. El editor no es controlado: los cambios externos van por `appendStatement`. */
+  initialValue: string
+  onChange?: (value: string) => void
+  commands: EditorCommands
+  ref?: Ref<SqlEditorHandle>
+}
+
+/** Editor Monaco con atajos Ctrl+Enter (sentencia actual) y Ctrl+Shift+Enter (todo). */
+export function SqlEditor({ engine, initialValue, onChange, commands, ref }: Props) {
+  const host = useRef<HTMLDivElement>(null)
+  const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
+  const latest = useRef({ onChange, commands })
+  latest.current = { onChange, commands }
+  const runRef = useRef<(all: boolean) => void>(() => {})
+
+  useImperativeHandle(ref, () => ({
+    appendStatement(statement) {
+      const instance = editor.current
+      const model = instance?.getModel()
+      if (!instance || !model) return
+      const current = model.getValue()
+      const separator = current.trim() === '' || current.endsWith('\n\n') ? '' : current.endsWith('\n') ? '\n' : '\n\n'
+      const text = `${separator}${statement};\n`
+      const end = model.getFullModelRange().getEndPosition()
+      const range = new monaco.Range(end.lineNumber, end.column, end.lineNumber, end.column)
+      instance.executeEdits('externo', [{ range, text }])
+      instance.setPosition(model.getFullModelRange().getEndPosition())
+      instance.revealLine(model.getLineCount())
+      instance.focus()
+    },
+    runCurrent: () => runRef.current(false),
+    runAll: () => runRef.current(true)
+  }))
+
+  useEffect(() => {
+    registerCompletion()
+    const instance = monaco.editor.create(host.current!, {
+      value: initialValue,
+      language: languageFor(engine),
+      theme: 'gestor-dark',
+      automaticLayout: true,
+      minimap: { enabled: false },
+      fontSize: 13,
+      fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, monospace",
+      scrollBeyondLastLine: false,
+      wordWrap: 'off',
+      tabSize: 2,
+      renderLineHighlight: 'all',
+      quickSuggestions: { other: true, comments: false, strings: false },
+      suggestOnTriggerCharacters: true,
+      fixedOverflowWidgets: true
+    })
+    editor.current = instance
+
+    const run = (all: boolean) => {
+      const model = instance.getModel()
+      if (!model) return
+      if (all) return latest.current.commands.runAll(model.getValue())
+      const selection = instance.getSelection()
+      if (selection && !selection.isEmpty()) {
+        return latest.current.commands.runCurrent(model.getValueInRange(selection), true, 0)
+      }
+      const position = instance.getPosition()
+      const offset = position ? model.getOffsetAt(position) : 0
+      latest.current.commands.runCurrent(model.getValue(), false, offset)
+    }
+    runRef.current = run
+    instance.addAction({
+      id: 'gestor.runCurrent',
+      label: 'Ejecutar sentencia actual',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => run(false)
+    })
+    instance.addAction({
+      id: 'gestor.runAll',
+      label: 'Ejecutar todo el script',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+      run: () => run(true)
+    })
+    const sub = instance.onDidChangeModelContent(() => latest.current.onChange?.(instance.getValue()))
+    instance.focus()
+    return () => {
+      sub.dispose()
+      instance.dispose()
+      editor.current = null
+    }
+    // Se crea una vez por consola (el padre usa key={consola}); el motor se sincroniza abajo.
+  }, [])
+
+  useEffect(() => {
+    const model = editor.current?.getModel()
+    if (model) monaco.editor.setModelLanguage(model, languageFor(engine))
+  }, [engine])
+
+  return <div ref={host} style={{ height: '100%', width: '100%' }} />
+}

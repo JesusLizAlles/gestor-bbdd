@@ -1,0 +1,24 @@
+appId: com.sethotels.gestorbbdd
+productName: Gestor BBDD
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+asarUnpack: []
+# Sin módulos nativos obligatorios (ssh2 funciona en JS puro): no recompilar nada.
+npmRebuild: false
+linux:
+  target: [AppImage]
+  category: Development
+  maintainer: Set Hotels
+win:
+  target: [nsis]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target: [dmg]
+  category: public.app-category.developer-tools
