@@ -4,6 +4,7 @@ import type { ConnectionSummary, QueryResult } from '@shared/types'
 import { DEFAULT_MAX_ROWS } from '@shared/types'
 import { setCompletionSource, type CompletionSource } from '../lib/monaco'
 import { ConfirmDialog } from './ConfirmDialog'
+import { QueryHistoryPanel } from './QueryHistoryPanel'
 import { ResultsPanel } from './ResultsPanel'
 import { SqlEditor, type EditorCommands, type SqlEditorHandle } from './SqlEditor'
 
@@ -66,6 +67,22 @@ export function ConsoleView({ tab, active }: Props) {
   const [schemaVersion, setSchemaVersion] = useState(0)
   const [completionState, setCompletionState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const editorRef = useRef<SqlEditorHandle>(null)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  // Sube tras cada ejecución para que el panel de historial se recargue.
+  const [historyVersion, setHistoryVersion] = useState(0)
+
+  // Ctrl+Alt+E abre o cierra el historial, como en DataGrip.
+  useEffect(() => {
+    if (!active) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault()
+        setHistoryOpen((open) => !open)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [active])
 
   useEffect(() => {
     window.api
@@ -124,6 +141,7 @@ export function ConsoleView({ tab, active }: Props) {
       setMessage({ kind: 'error', text: (err as Error).message })
     } finally {
       setRunning(false)
+      setHistoryVersion((v) => v + 1)
     }
   }
 
@@ -198,6 +216,14 @@ export function ConsoleView({ tab, active }: Props) {
             </option>
           ))}
         </select>
+        <button
+          className={`compact ${historyOpen ? 'on' : ''}`}
+          aria-pressed={historyOpen}
+          title="Historial de consultas (Ctrl+Alt+E)"
+          onClick={() => setHistoryOpen((open) => !open)}
+        >
+          Historial
+        </button>
         <div className="spacer" />
         <span className="hint">
           {completionState === 'loading' && 'Cargando tablas para el autocompletado… · '}
@@ -206,12 +232,22 @@ export function ConsoleView({ tab, active }: Props) {
           <kbd>Ctrl</kbd>+<kbd>Enter</kbd> sentencia actual
         </span>
       </div>
-      <div className="workspace">
-        <div className="editor-host" style={{ height: editorHeight }}>
-          <SqlEditor ref={editorRef} engine={engine} initialValue={tab.initialSql} commands={commands} />
+      <div className="console-body">
+        <div className="workspace">
+          <div className="editor-host" style={{ height: editorHeight }}>
+            <SqlEditor ref={editorRef} engine={engine} initialValue={tab.initialSql} commands={commands} />
+          </div>
+          <div className="splitter" onMouseDown={startResize} />
+          <ResultsPanel engine={engine} results={results} running={running} message={message} maxRows={maxRows} />
         </div>
-        <div className="splitter" onMouseDown={startResize} />
-        <ResultsPanel engine={engine} results={results} running={running} message={message} maxRows={maxRows} />
+        {historyOpen && (
+          <QueryHistoryPanel
+            connectionId={connection.id}
+            refreshKey={historyVersion}
+            onInsert={(text) => editorRef.current?.insertAtCursor(text)}
+            onClose={() => setHistoryOpen(false)}
+          />
+        )}
       </div>
 
       {confirm && (

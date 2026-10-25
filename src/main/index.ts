@@ -6,6 +6,7 @@ import { registerIpc } from './ipc'
 import { SessionManager } from './sessions'
 import { KnownHosts } from './ssh/known-hosts'
 import { ConnectionStore } from './store/connections'
+import { HistoryStore } from './store/history'
 import { SecretVault, type SecretCipher } from './store/secrets'
 
 const here = import.meta.dirname
@@ -84,9 +85,10 @@ app.whenReady().then(() => {
   const dataDir = app.getPath('userData')
   const vault = new SecretVault(dataDir, electronCipher)
   const store = new ConnectionStore(dataDir, vault)
-  const sessions = new SessionManager({ createDriver, knownHosts: new KnownHosts(dataDir) })
+  const history = new HistoryStore(dataDir)
+  const sessions = new SessionManager({ createDriver, knownHosts: new KnownHosts(dataDir), history })
 
-  registerIpc({ store, vault, sessions, window: () => mainWindow })
+  registerIpc({ store, vault, sessions, history, window: () => mainWindow })
   mainWindow = createWindow()
   mainWindow.on('closed', () => {
     mainWindow = null

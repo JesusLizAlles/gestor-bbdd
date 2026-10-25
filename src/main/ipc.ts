@@ -5,11 +5,14 @@ import { channelName, type ApiChannel, type IpcEnvelope } from '@shared/ipc'
 import type { ConnectionConfig, DbApi, SaveConnectionInput, SecretKey } from '@shared/types'
 import { ZodError } from 'zod'
 import type { SessionManager } from './sessions'
+import type { HistoryStore } from './store/history'
 import type { ConnectionStore } from './store/connections'
 import type { SecretVault } from './store/secrets'
 import {
   countSchema,
   exportSchema,
+  historyKindSchema,
+  historySearchSchema,
   identifierSchema,
   idSchema,
   runQuerySchema,
@@ -23,6 +26,7 @@ export interface IpcDeps {
   store: ConnectionStore
   vault: SecretVault
   sessions: SessionManager
+  history: HistoryStore
   window: () => BrowserWindow | null
 }
 
@@ -45,13 +49,15 @@ async function mergeSecrets(vault: SecretVault, input: SaveConnectionInput): Pro
   return stored
 }
 
-export function registerIpc({ store, vault, sessions, window }: IpcDeps): void {
+export function registerIpc({ store, vault, sessions, history, window }: IpcDeps): void {
   const handlers: Handlers = {
     secretStorageStatus: async () => vault.status(),
     listConnections: () => store.list(),
     saveConnection: (input) => store.save(saveConnectionSchema.parse(input)),
     deleteConnection: async (id) => {
-      await store.delete(idSchema.parse(id))
+      const connectionId = idSchema.parse(id)
+      await store.delete(connectionId)
+      await history.deleteConnection(connectionId)
     },
     testConnection: async (raw) => {
       const input = saveConnectionSchema.parse(raw)
@@ -78,6 +84,10 @@ export function registerIpc({ store, vault, sessions, window }: IpcDeps): void {
     tableStructure: (id, ref) => sessions.tableStructure(idSchema.parse(id), tableRefSchema.parse(ref)),
     saveRowChanges: (id, input) => sessions.saveRowChanges(idSchema.parse(id), rowChangesSchema.parse(input)),
     runQuery: (id, input) => sessions.run(idSchema.parse(id), runQuerySchema.parse(input)),
+    queryHistory: (id, search) => history.listQueries(idSchema.parse(id), historySearchSchema.parse(search)),
+    filterHistory: (id, ref) => history.listFilters(idSchema.parse(id), tableRefSchema.parse(ref)),
+    clearHistory: (id, kind, ref) =>
+      history.clear(idSchema.parse(id), historyKindSchema.parse(kind), ref == null ? undefined : tableRefSchema.parse(ref)),
     cancelQuery: (id) => sessions.cancel(idSchema.parse(id)),
     exportFile: async (raw) => {
       const input = exportSchema.parse(raw)

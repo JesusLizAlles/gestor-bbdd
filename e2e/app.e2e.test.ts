@@ -135,8 +135,8 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
   })
 
   it('filtra con WHERE y cuenta las filas bajo demanda', async () => {
-    await view().getByLabel('Filtro').fill("estado = 'confirmada'")
-    await view().getByLabel('Filtro').press('Enter')
+    await view().getByLabel('Filtro', { exact: true }).fill("estado = 'confirmada'")
+    await view().getByLabel('Filtro', { exact: true }).press('Enter')
     await view().locator('.pager .range', { hasText: /1–3 de \?/ }).waitFor()
     await view().getByTitle('Contar filas').click()
     await view().locator('.pager .range', { hasText: '1–3 de 3' }).waitFor()
@@ -148,7 +148,7 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await view().locator('[data-cell="0:1"]').click({ modifiers: ['Control'] })
     await tab('clientes').waitFor()
     await view().locator('.grid-cell', { hasText: 'Marie Dubois' }).waitFor()
-    await expect(view().getByLabel('Filtro').inputValue()).resolves.toBe('`id` = 3')
+    await expect(view().getByLabel('Filtro', { exact: true }).inputValue()).resolves.toBe('`id` = 3')
     expect(await view().locator('.grid-row').count()).toBe(1)
     await shot('03-navegacion-fk')
   })
@@ -214,8 +214,8 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
   })
 
   it('si otro borró la fila, no guarda nada y lo explica', async () => {
-    await view().getByLabel('Filtro').fill('')
-    await view().getByLabel('Filtro').press('Enter')
+    await view().getByLabel('Filtro', { exact: true }).fill('')
+    await view().getByLabel('Filtro', { exact: true }).press('Enter')
     await view().locator('.pager .range', { hasText: /1–5/ }).waitFor()
     await admin.query(`INSERT INTO ${DB}.clientes (id, nombre) VALUES (99, 'Temporal')`)
     await view().getByTitle('Recargar (F5)').click()
@@ -318,6 +318,56 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await view().locator('.view-line', { hasText: 'SELECT * FROM' }).waitFor()
     await view().getByRole('button', { name: '▶ Ejecutar' }).click()
     await view().locator('.result-tab', { hasText: 'Resultado 1 (5)' }).waitFor()
+  })
+
+  it('el historial de la consola (Ctrl+Alt+E) busca e inserta consultas anteriores', async () => {
+    // Seguimos en "Consola 2", que acaba de ejecutar el SELECT de reservas.
+    await view().locator('.monaco-editor').click()
+    await page.keyboard.press('Control+Alt+e')
+    const panel = view().getByRole('complementary', { name: 'Historial de consultas' })
+    await panel.waitFor()
+    // Las dos consolas comparten conexión y por tanto historial; la más reciente, primero.
+    await expect(panel.locator('.history-item').first().innerText()).resolves.toContain('SELECT * FROM `gestor_e2e`.`reservas`')
+    await panel.locator('.history-item', { hasText: 'r.importe > 1000' }).locator('.history-meta', { hasText: '3 filas' }).waitFor()
+    await panel.getByLabel('Buscar en el historial').fill('importe > 1000')
+    await expect.poll(() => panel.locator('.history-item').count()).toBe(1)
+    await shot('12-historial-consultas')
+    await panel.getByLabel('Buscar en el historial').press('Enter')
+    await view().locator('.view-line', { hasText: 'WHERE r.importe > 1000' }).waitFor()
+    // El cursor queda tras la sentencia insertada: Ctrl+Enter la ejecuta.
+    await page.keyboard.press('Control+Enter')
+    await view().locator('.result-tab', { hasText: 'Resultado 1 (3)' }).waitFor()
+    await panel.getByLabel('Buscar en el historial').fill('')
+    await expect(panel.locator('.history-item').first().innerText()).resolves.toContain('r.importe > 1000')
+    await page.keyboard.press('Control+Alt+e')
+    await expect.poll(() => panel.count()).toBe(0)
+  })
+
+  it('el campo WHERE recuerda los filtros de cada tabla', async () => {
+    await tab('reservas').click()
+    await view().getByRole('tab', { name: 'Datos' }).click()
+    const filter = view().getByLabel('Filtro', { exact: true })
+    await filter.fill('importe > 1000')
+    await filter.press('Enter')
+    await view().locator('.pager .range', { hasText: /1–3 de/ }).waitFor()
+    await view().getByTitle('Quitar filtro').click()
+    await view().locator('.pager .range', { hasText: /1–5 de/ }).waitFor()
+    await view().getByLabel('Filtros recientes', { exact: true }).click()
+    const menu = view().getByRole('listbox', { name: 'Filtros recientes' })
+    await expect.poll(() => menu.getByRole('option').allInnerTexts()).toEqual(['importe > 1000', "estado = 'confirmada'"])
+    await shot('13-historial-filtros')
+    await menu.getByRole('option', { name: "estado = 'confirmada'" }).click()
+    await expect(filter.inputValue()).resolves.toBe("estado = 'confirmada'")
+    await view().locator('.pager .range', { hasText: /1–3 de/ }).waitFor()
+    // Con el teclado: flecha abajo abre la lista (ya ordenada por uso), flechas eligen, Enter aplica.
+    await filter.fill('')
+    await filter.press('ArrowDown')
+    await expect.poll(() => menu.getByRole('option').allInnerTexts()).toEqual(["estado = 'confirmada'", 'importe > 1000'])
+    await filter.press('ArrowDown')
+    await filter.press('ArrowDown')
+    await filter.press('Enter')
+    await expect(filter.inputValue()).resolves.toBe('importe > 1000')
+    await view().locator('.pager .range', { hasText: /1–3 de/ }).waitFor()
   })
 
   it('cierra la pestaña activa con Ctrl+W', async () => {

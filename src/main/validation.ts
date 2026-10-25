@@ -93,6 +93,9 @@ export const rowChangesSchema = z.object({
   confirmedWrite: z.boolean().optional()
 })
 
+export const historyKindSchema = z.enum(['queries', 'filters'])
+export const historySearchSchema = z.string().max(1000).optional()
+
 export const exportSchema = z.object({
   defaultName: z.string().min(1).max(200),
   format: z.enum(['csv', 'json', 'sql']),

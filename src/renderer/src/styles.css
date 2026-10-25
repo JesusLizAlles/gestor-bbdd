@@ -1025,3 +1025,136 @@ button.compact {
   color: #6f737a;
   font-style: italic;
 }
+
+/* Historial de la consola */
+.console-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+.console-body .workspace {
+  flex: 1;
+  min-width: 0;
+}
+button.compact.on {
+  background: var(--bg-select);
+  border-color: var(--accent);
+}
+.history-panel {
+  width: 380px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  min-height: 0;
+}
+.history-header,
+.history-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  flex: none;
+}
+.history-header .spacer,
+.history-footer .spacer,
+.history-meta .spacer {
+  flex: 1;
+}
+.history-footer {
+  border-top: 1px solid var(--border);
+}
+.history-search {
+  padding: 0 10px 8px;
+  flex: none;
+}
+.history-list {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.history-item {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.history-item:hover {
+  background: var(--bg-hover);
+}
+.history-item.on {
+  background: var(--bg-select);
+}
+.history-item.failed {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.history-sql {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 3.9em;
+  overflow: hidden;
+  user-select: text;
+}
+.history-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.history-meta .link {
+  font-size: 11px;
+  visibility: hidden;
+}
+.history-item:hover .history-meta .link,
+.history-item.on .history-meta .link {
+  visibility: visible;
+}
+.history-error {
+  color: var(--danger);
+}
+
+/* Historial de filtros WHERE */
+.filter {
+  position: relative;
+}
+.filter-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: max(100%, 380px);
+  max-width: 640px;
+  z-index: 20;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px 0;
+}
+.filter-option {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filter-option.on {
+  background: var(--bg-select);
+}
+.filter-option.current::after {
+  content: '  · aplicado';
+  color: var(--text-dim);
+  font-family: system-ui, sans-serif;
+}
+.filter-clear {
+  display: block;
+  padding: 6px 10px 2px;
+}

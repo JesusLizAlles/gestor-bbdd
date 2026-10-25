@@ -226,6 +226,23 @@ export interface RowChangesOutput {
   preview?: string[]
 }
 
+/** Una ejecución en la consola, tal como la registra el proceso principal. */
+export interface QueryHistoryEntry {
+  id: string
+  sql: string
+  database: string | null
+  /** ISO 8601. */
+  executedAt: string
+  durationMs: number
+  /** Nº de sentencias ejecutadas en esa ejecución. */
+  statements: number
+  /** Filas devueltas o afectadas por la última sentencia; null si no se llegó a ejecutar. */
+  rowCount: number | null
+  error?: string
+}
+
+export type HistoryKind = 'queries' | 'filters'
+
 export interface ExportInput {
   defaultName: string
   format: 'csv' | 'json' | 'sql'
@@ -250,6 +267,12 @@ export interface DbApi {
   tableStructure(sessionId: string, ref: TableRef): Promise<TableStructure>
   saveRowChanges(sessionId: string, input: RowChangesInput): Promise<RowChangesOutput>
   runQuery(sessionId: string, input: RunQueryInput): Promise<RunQueryOutput>
+  /** Historial de la consola de una conexión, del más reciente al más antiguo. */
+  queryHistory(connectionId: string, search?: string): Promise<QueryHistoryEntry[]>
+  /** Filtros WHERE usados en una tabla, del más reciente al más antiguo. */
+  filterHistory(connectionId: string, ref: TableRef): Promise<string[]>
+  /** Borra el historial de consultas de la conexión, o el de filtros de una tabla (o de todas si no se indica). */
+  clearHistory(connectionId: string, kind: HistoryKind, ref?: TableRef): Promise<void>
   cancelQuery(sessionId: string): Promise<void>
   exportFile(input: ExportInput): Promise<string | null>
   pickFile(title: string): Promise<string | null>

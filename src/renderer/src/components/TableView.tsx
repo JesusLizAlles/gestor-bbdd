@@ -17,6 +17,7 @@ import type {
 import { PAGE_SIZES } from '@shared/types'
 import { ConfirmDialog } from './ConfirmDialog'
 import { DataGrid, type FocusRequest, type PendingEdits } from './DataGrid'
+import { FilterInput } from './FilterInput'
 
 export interface OpenTable {
   type: 'table'
@@ -463,31 +464,15 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
                 Cancelar
               </button>
             )}
-            <div className="filter">
-              <span className="filter-label">WHERE</span>
-              <input
-                aria-label="Filtro"
-                placeholder={engine === 'mysql' ? "p. ej. estado = 'confirmada' AND importe > 100" : "p. ej. Codigo LIKE 'A%'"}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') applyFilter(draft)
-                  if (e.key === 'Escape') setDraft(where)
-                }}
-              />
-              {(where || draft) && (
-                <button
-                  className="icon"
-                  title="Quitar filtro"
-                  onClick={() => {
-                    setDraft('')
-                    applyFilter('')
-                  }}
-                >
-                  ✕
-                </button>
-              )}
-            </div>
+            <FilterInput
+              engine={engine}
+              connectionId={connection.id}
+              tableRef={ref}
+              value={draft}
+              applied={where}
+              onChange={setDraft}
+              onApply={applyFilter}
+            />
             <button className="compact" disabled={!editable || loading} title="Añadir fila (Alt+Insert)" onClick={addRow}>
               ＋ Fila
             </button>

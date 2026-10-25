@@ -17,6 +17,7 @@ se genera por detrás.
   - Paginación de 100 a 5000 filas. El total se cuenta solo al pulsar «?»: contar tablas enormes es caro.
   - Orden al pulsar la cabecera (▲, ▼, sin orden). Sin orden, se pagina por clave primaria para que las páginas sean estables.
   - Filtro `WHERE` opcional: solo admite una condición de lectura; se rechaza cualquier escritura o segunda sentencia.
+    Recuerda los últimos 30 filtros que han funcionado en cada tabla. Para recuperarlos: botón ▾, o <kbd>↓</kbd> en el campo y luego flechas y <kbd>Enter</kbd>.
   - Columnas redimensionables y navegación con teclado: flechas, RePág/AvPág, Inicio/Fin, Ctrl+Inicio/Fin y Ctrl+C para copiar.
   - **Navegación por claves foráneas**: botón ↗, Ctrl+clic o Ctrl+B en una celda abren la fila referenciada.
   - Exportar la página a CSV, CSV para Excel, JSON o `INSERT`.
@@ -39,6 +40,10 @@ se genera por detrás.
   - Resultados en pestañas, límite de filas aplicado en el servidor, cancelar y exportar.
   - En conexiones de solo lectura bloquea las escrituras; en producción pide confirmación.
   - Tras un `CREATE`, `ALTER` o `DROP`, el autocompletado se recarga.
+  - **Historial** (botón «Historial» o <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>E</kbd>, como en DataGrip):
+    - Guarda las últimas 500 ejecuciones de cada conexión, con base de datos, fecha, duración, filas y error, si lo hubo.
+    - Tiene buscador. <kbd>Enter</kbd> o doble clic insertan la consulta en el cursor, terminada en `;`.
+    - Las consultas bloqueadas por solo lectura, o pendientes de confirmar, no se guardan.
 - **Atajos**:
 
   | Atajo | Acción |
@@ -88,7 +93,9 @@ Cada conexión abierta usa **dos conexiones al servidor**:
 
 Con SSH, el driver conecta a `127.0.0.1:<puerto local>` y el túnel reenvía el tráfico al servidor.
 
-Los datos de la app se guardan en `~/.config/Gestor BBDD/`: `connections.json`, `secrets.json` y `known_hosts.json`, todos con permisos 0600.
+Los datos de la app se guardan en `~/.config/Gestor BBDD/`: `connections.json`, `secrets.json`, `known_hosts.json` y `history.json`, todos con permisos 0600.
+
+El historial guarda el texto de las consultas tal cual: si escribes datos sensibles en una consulta, quedan en `history.json`. Se puede borrar desde el panel de historial y se borra junto con la conexión. Los scripts de más de 100.000 caracteres no se guardan.
 
 ## Tests
 
@@ -144,7 +151,7 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
 - **SSH:**
   - Sin saltos encadenados (*jump hosts*) y sin leer `~/.ssh/config`.
   - La primera conexión acepta la huella automáticamente. Se muestra en «Probar conexión» y en la barra de estado.
-- **Funciones aún no disponibles:** importar CSV, historial de consultas.
+- **Funciones aún no disponibles:** importar CSV.
 - **Edición:**
   - Los valores se envían como texto y los convierte el servidor (`'25.5'` → DECIMAL).
   - No se pueden editar binarios: se muestran abreviados en `0x…`.

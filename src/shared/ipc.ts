@@ -20,6 +20,9 @@ export const API_CHANNELS = [
   'tableStructure',
   'saveRowChanges',
   'runQuery',
+  'queryHistory',
+  'filterHistory',
+  'clearHistory',
   'cancelQuery',
   'exportFile',
   'pickFile'

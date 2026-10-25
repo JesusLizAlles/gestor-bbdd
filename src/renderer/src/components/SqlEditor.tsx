@@ -12,6 +12,11 @@ export interface EditorCommands {
 export interface SqlEditorHandle {
   /** Añade una sentencia al final, separada por una línea en blanco, conservando el deshacer. */
   appendStatement: (statement: string) => void
+  /**
+   * Inserta una sentencia donde está el cursor (reemplazando la selección), en su propia línea
+   * y terminada en `;`, y deja el cursor detrás.
+   */
+  insertAtCursor: (statement: string) => void
   /** Lo mismo que Ctrl+Enter: sentencia bajo el cursor o selección. */
   runCurrent: () => void
   runAll: () => void
@@ -47,6 +52,23 @@ export function SqlEditor({ engine, initialValue, onChange, commands, ref }: Pro
       instance.executeEdits('externo', [{ range, text }])
       instance.setPosition(model.getFullModelRange().getEndPosition())
       instance.revealLine(model.getLineCount())
+      instance.focus()
+    },
+    insertAtCursor(statement) {
+      const instance = editor.current
+      const model = instance?.getModel()
+      const selection = instance?.getSelection()
+      if (!instance || !model || !selection) return
+      const body = /;\s*$/.test(statement) ? statement.trim() : `${statement.trim()};`
+      const before = model.getValueInRange(new monaco.Range(1, 1, selection.startLineNumber, selection.startColumn))
+      const after = model.getValueInRange(
+        new monaco.Range(selection.endLineNumber, selection.endColumn, model.getLineCount(), model.getLineMaxColumn(model.getLineCount()))
+      )
+      const prefix = before.trim() === '' || before.endsWith('\n') ? '' : '\n'
+      const suffix = after.startsWith('\n') || after === '' ? '' : '\n'
+      instance.executeEdits('historial', [{ range: selection, text: `${prefix}${body}${suffix}` }])
+      const end = instance.getPosition()
+      if (end && suffix) instance.setPosition({ lineNumber: end.lineNumber - 1, column: model.getLineMaxColumn(end.lineNumber - 1) })
       instance.focus()
     },
     runCurrent: () => runRef.current(false),

@@ -13,6 +13,7 @@ import { createDriver } from '../src/main/drivers'
 import { MysqlDriver } from '../src/main/drivers/mysql'
 import { SessionManager } from '../src/main/sessions'
 import { KnownHosts } from '../src/main/ssh/known-hosts'
+import { HistoryStore } from '../src/main/store/history'
 import { baseConfig, listen, SSH_PASSWORD, SSH_USER, startSshServer } from './helpers'
 
 const env = process.env
@@ -480,6 +481,52 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
       } finally {
         await sessions.close(ro.sessionId)
       }
+    })
+  })
+
+  describe('historial', () => {
+    let history: HistoryStore
+    let withHistory: SessionManager
+    let id: string
+
+    beforeAll(async () => {
+      history = new HistoryStore(join(dir, 'historial'))
+      withHistory = new SessionManager({ createDriver, knownHosts: new KnownHosts(dir), history })
+      id = (await withHistory.open({ ...config, id: 'con-historial' }, { password })).sessionId
+    })
+    afterAll(async () => {
+      await withHistory.closeAll()
+    })
+
+    it('registra cada ejecución de la consola con filas, duración y errores', async () => {
+      await withHistory.run(id, { sql: 'SELECT n FROM numeros WHERE n <= 3', database: DB })
+      await withHistory.run(id, { sql: 'SELECT 1; SELECT * FROM no_existe', database: DB })
+      const list = await history.listQueries('con-historial')
+      expect(list[0]).toMatchObject({ sql: 'SELECT 1; SELECT * FROM no_existe', statements: 2, rowCount: null, database: DB })
+      expect(list[0]!.error).toMatch(/no_existe/)
+      expect(list[1]).toMatchObject({ sql: 'SELECT n FROM numeros WHERE n <= 3', rowCount: 3, statements: 1 })
+      expect(list[1]!.error).toBeUndefined()
+      expect(list[1]!.durationMs).toBeGreaterThanOrEqual(0)
+    })
+
+    it('no registra lo que se bloqueó sin ejecutarse', async () => {
+      const ro = await withHistory.open({ ...config, id: 'ro-historial', readOnly: true }, { password })
+      try {
+        const out = await withHistory.run(ro.sessionId, { sql: 'DELETE FROM numeros', database: DB })
+        expect(out.blocked).toBe('readOnly')
+        expect(await history.listQueries('ro-historial')).toEqual([])
+      } finally {
+        await withHistory.close(ro.sessionId)
+      }
+    })
+
+    it('recuerda solo los filtros WHERE que han funcionado', async () => {
+      const ref = { database: DB, schema: null, table: 'numeros' }
+      await withHistory.fetchTableData(id, { ...ref, offset: 0, limit: 5, sort: [], where: 'n > 40' })
+      await withHistory.fetchTableData(id, { ...ref, offset: 5, limit: 5, sort: [], where: 'n > 40' })
+      await expect(withHistory.fetchTableData(id, { ...ref, offset: 0, limit: 5, sort: [], where: 'inventada = 1' })).rejects.toThrow()
+      await withHistory.fetchTableData(id, { ...ref, offset: 0, limit: 5, sort: [] })
+      expect(await history.listFilters('con-historial', ref)).toEqual(['n > 40'])
     })
   })
 

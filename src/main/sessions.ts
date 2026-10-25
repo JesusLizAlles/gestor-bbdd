@@ -38,6 +38,7 @@ import {
 import type { DriverFactory } from './drivers'
 import type { DbDriver } from './drivers/types'
 import type { KnownHosts } from './ssh/known-hosts'
+import type { HistoryStore } from './store/history'
 import { openSshTunnel, type SshAuth, type Tunnel } from './ssh/tunnel'
 
 type Secrets = Partial<Record<SecretKey, string>>
@@ -62,6 +63,8 @@ export interface SessionDeps {
   knownHosts: KnownHosts
   /** Socket del agente SSH (SSH_AUTH_SOCK); inyectable para tests. */
   agentSocket?: string
+  /** Historial de consultas y filtros; opcional para poder probar sin él. */
+  history?: HistoryStore
 }
 
 /** Abre conexiones (con túnel si procede) y ejecuta consultas sobre ellas. */
@@ -142,7 +145,29 @@ export class SessionManager {
     // Si hay algo en marcha en esta conexión (otra pestaña, otra consola), espera su turno.
     return this.exclusive(session, async () => {
       const results: QueryResult[] = []
-      if (input.database) await driver.useDatabase(input.database)
+      const executedAt = new Date().toISOString()
+      const startedAll = performance.now()
+      const record = (rowCount: number | null, error?: string) =>
+        this.deps.history
+          ?.addQuery(config.id, {
+            sql: input.sql,
+            database: input.database ?? null,
+            executedAt,
+            durationMs: Math.round(performance.now() - startedAll),
+            statements: statements.length,
+            rowCount,
+            ...(error ? { error } : {})
+          })
+          // El historial nunca debe hacer fallar una consulta.
+          .catch(() => {})
+      if (input.database) {
+        try {
+          await driver.useDatabase(input.database)
+        } catch (err) {
+          await record(null, (err as Error).message)
+          throw err
+        }
+      }
       const maxRows = input.maxRows ?? DEFAULT_MAX_ROWS
       for (const statement of statements) {
         const started = performance.now()
@@ -162,6 +187,8 @@ export class SessionManager {
           break
         }
       }
+      const last = results.at(-1)
+      await record(last && !last.error ? (last.columns.length ? last.rows.length : last.affectedRows) : null, last?.error)
       return { results }
     })
   }
@@ -185,6 +212,8 @@ export class SessionManager {
     })
     const started = performance.now()
     const [result] = await this.exclusive(session, () => session.driver.execute(sql, { maxRows: input.limit + 1 }))
+    // Solo se recuerdan los filtros que han funcionado.
+    if (where) await this.deps.history?.addFilter(session.config.id, ref, where).catch(() => {})
     const rows = result?.rows ?? []
     return {
       columns: result?.columns ?? [],
