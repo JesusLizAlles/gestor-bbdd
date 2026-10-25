@@ -1,11 +1,15 @@
 appId: com.sethotels.gestorbbdd
 productName: Gestor BBDD
+# Nombres sin espacios, cómodos para descargar y enlazar desde las Releases.
+artifactName: gestor-bbdd-${version}-${os}-${arch}.${ext}
 directories:
   buildResources: resources
   output: dist
 files:
   - out/**
   - package.json
+  # Icono de la ventana en Linux (el proceso principal lo carga desde ../../resources).
+  - resources/icon.png
   - '!**/*.map'
 asarUnpack: []
 # Sin módulos nativos obligatorios (ssh2 funciona en JS puro): no recompilar nada.
@@ -17,6 +21,7 @@ linux:
 win:
   target: [nsis]
 nsis:
+  artifactName: gestor-bbdd-${version}-setup.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
 mac:

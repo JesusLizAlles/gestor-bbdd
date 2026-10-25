@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Icono de Gestor BBDD: base de datos sobre fondo azul. Fuente de icon.png e icon.ico (npm run icons). -->
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4a8bff"/>
+      <stop offset="1" stop-color="#1d48b8"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#fondo)"/>
+  <!-- Cilindro: cuerpo, tapa superior y dos separaciones entre discos. -->
+  <path d="M126 150 V362 A130 46 0 0 0 386 362 V150 Z" fill="#ffffff"/>
+  <ellipse cx="256" cy="150" rx="130" ry="46" fill="#dbe7ff"/>
+  <path d="M126 221 A130 46 0 0 0 386 221" fill="none" stroke="#2f66d9" stroke-width="14"/>
+  <path d="M126 292 A130 46 0 0 0 386 292" fill="none" stroke="#2f66d9" stroke-width="14"/>
+</svg>

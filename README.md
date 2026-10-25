@@ -60,11 +60,33 @@ npm install
 npm run dev          # desarrollo con recarga en caliente
 npm run build        # compila a out/
 npm start            # ejecuta lo compilado
-npm run dist:linux   # AppImage en dist/
-npm run dist:win     # instalador NSIS (mejor generarlo en Windows)
+npm run dist:linux   # dist/gestor-bbdd-<versión>-linux-x86_64.AppImage
+npm run dist:win     # dist/gestor-bbdd-<versión>-setup.exe (mejor en Windows o en GitHub Actions)
+npm run icons        # regenera resources/icon.png e icon.ico desde icon.svg (rsvg-convert + ImageMagick)
 ```
 
 Requiere Node.js 22.12 o superior. La primera ejecución descarga el binario de Electron.
+
+## Integración continua y versiones
+
+El flujo `.github/workflows/ci.yml` se ejecuta en GitHub Actions:
+
+| Cuándo | Qué hace |
+| --- | --- |
+| Push a `main` o pull request | Tipos, tests unitarios, integración contra una MariaDB 11.4 en contenedor y E2E con pantalla virtual (`xvfb`). |
+| «Run workflow» a mano (pestaña Actions) | Lo anterior y, además, el AppImage y el `.exe`. Quedan como artefactos 7 días. |
+| Etiqueta `vX.Y.Z` | Lo anterior y una **Release en borrador** con los dos instaladores y `SHA256SUMS.txt`. |
+
+Para sacar una versión:
+
+```bash
+npm version 0.2.0 -m "Versión %s"   # cambia package.json, hace commit y crea la etiqueta v0.2.0
+git push --follow-tags
+```
+
+Cuando termine el flujo, la Release aparece en borrador en GitHub → Releases; se revisa y se pulsa «Publish». El flujo falla a propósito si la etiqueta no coincide con la `version` de `package.json`.
+
+Los instaladores de Windows **no van firmados**: Windows SmartScreen avisará al instalarlos hasta que se configure un certificado de firma de código.
 
 ## Arquitectura
 

@@ -1,0 +1,163 @@
+# Integración continua y versiones de Gestor BBDD.
+#
+# - Cada push a main y cada pull request: tipos, tests unitarios, de integración contra MariaDB y E2E.
+# - Al subir una etiqueta vX.Y.Z (que debe coincidir con "version" de package.json): además genera el
+#   AppImage (Linux) y el instalador .exe (Windows) y los deja en una Release en borrador.
+# - "Run workflow" a mano: tests y paquetes, sin Release (los paquetes quedan como artefactos 7 días).
+#
+# Las acciones van fijadas por commit (con la versión en el comentario) para que una etiqueta
+# movida no cambie el código que se ejecuta con acceso al repositorio.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Un push nuevo cancela la ejecución anterior de la misma rama; las versiones nunca se cancelan.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci-root-pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      # Base de datos desechable del propio job: estas contraseñas no protegen nada real.
+      TEST_MYSQL_HOST: 127.0.0.1
+      TEST_MYSQL_PORT: 3306
+      TEST_MYSQL_USER: root
+      TEST_MYSQL_PASSWORD: ci-root-pass
+      TEST_MYSQL_RO_USER: lector
+      TEST_MYSQL_RO_PASSWORD: lector-ci-pass
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Usuario de solo lectura para los tests
+        run: >-
+          mysql -h 127.0.0.1 -P 3306 -u root -p"$TEST_MYSQL_PASSWORD"
+          -e "CREATE USER 'lector'@'%' IDENTIFIED BY '$TEST_MYSQL_RO_PASSWORD'; GRANT SELECT ON *.* TO 'lector'@'%';"
+
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Preparar Electron para el E2E
+        run: |
+          node node_modules/electron/install.js
+          # Ubuntu 24.04 restringe los espacios de nombres que usa el sandbox de Chromium.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          mkdir -p "$RUNNER_TEMP/capturas"
+
+      - name: E2E
+        run: xvfb-run --auto-servernum npm run test:e2e
+        env:
+          E2E_SCREENSHOTS: ${{ runner.temp }}/capturas
+
+      - name: Capturas del E2E
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: capturas-e2e
+          path: ${{ runner.temp }}/capturas
+          retention-days: 7
+          if-no-files-found: ignore
+
+  package:
+    name: Paquete ${{ matrix.name }}
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            script: dist:linux
+            files: dist/*.AppImage
+          - name: Windows
+            os: windows-latest
+            script: dist:win
+            files: dist/*.exe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: La etiqueta coincide con package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::La etiqueta $GITHUB_REF_NAME no coincide con la versión de package.json ($version)"
+            exit 1
+          fi
+
+      - name: Generar el paquete
+        run: npm run ${{ matrix.script }} -- --publish never
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: paquete-${{ matrix.name }}
+          path: ${{ matrix.files }}
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    name: Release en borrador
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: paquete-*
+          path: paquetes
+          merge-multiple: true
+
+      - name: Sumas SHA-256
+        working-directory: paquetes
+        run: sha256sum * | tee SHA256SUMS.txt
+
+      # En borrador: se revisa y se publica a mano desde la página de Releases.
+      - name: Crear la Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" paquetes/*
+          --repo "$GITHUB_REPOSITORY"
+          --title "Gestor BBDD $GITHUB_REF_NAME"
+          --generate-notes
+          --draft

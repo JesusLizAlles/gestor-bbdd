@@ -8,6 +8,7 @@ import { KnownHosts } from './ssh/known-hosts'
 import { ConnectionStore } from './store/connections'
 import { HistoryStore } from './store/history'
 import { SecretVault, type SecretCipher } from './store/secrets'
+import icon from '../../resources/icon.png?asset'
 
 const here = import.meta.dirname
 
@@ -41,6 +42,8 @@ function createWindow(): BrowserWindow {
     title: 'Gestor BBDD',
     backgroundColor: '#1e1f22',
     autoHideMenuBar: true,
+    // En Windows y macOS el icono sale del ejecutable; en Linux hay que dárselo a la ventana.
+    ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(here, '../preload/index.cjs'),
       sandbox: true,
