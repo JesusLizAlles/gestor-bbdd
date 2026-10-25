@@ -6,7 +6,16 @@
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
-  "author": "Set Hotels",
+  "author": "Jesús Liz Alles",
+  "license": "MIT",
+  "homepage": "https://github.com/JesusLizAlles/gestor-bbdd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JesusLizAlles/gestor-bbdd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JesusLizAlles/gestor-bbdd/issues"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -20,6 +29,7 @@
     "icons": "bash scripts/build-icons.sh"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "mssql": "^12.7.11",
     "mysql2": "^3.24.6",
     "ssh2": "^1.17.0",

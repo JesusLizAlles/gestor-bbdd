@@ -2,7 +2,8 @@
 #
 # - Cada push a main y cada pull request: tipos, tests unitarios, de integración contra MariaDB y E2E.
 # - Al subir una etiqueta vX.Y.Z (que debe coincidir con "version" de package.json): además genera el
-#   AppImage (Linux) y el instalador .exe (Windows) y los deja en una Release en borrador.
+#   AppImage (Linux) y el instalador .exe (Windows) y los deja en una Release en borrador. Al publicarla,
+#   las apps instaladas la detectan (electron-updater lee latest.yml / latest-linux.yml de la Release).
 # - "Run workflow" a mano: tests y paquetes, sin Release (los paquetes quedan como artefactos 7 días).
 #
 # Las acciones van fijadas por commit (con la versión en el comentario) para que una etiqueta
@@ -94,14 +95,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Además del instalador, latest*.yml (y el .blockmap en Windows) para las actualizaciones automáticas.
           - name: Linux
             os: ubuntu-latest
             script: dist:linux
-            files: dist/*.AppImage
+            files: |
+              dist/*.AppImage
+              dist/latest-linux.yml
           - name: Windows
             os: windows-latest
             script: dist:win
-            files: dist/*.exe
+            files: |
+              dist/*.exe
+              dist/*.exe.blockmap
+              dist/latest.yml
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

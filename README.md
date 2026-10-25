@@ -1,7 +1,10 @@
-# Gestor BBDD · prototipo
+# Gestor BBDD
 
-Gestor de bases de datos de escritorio para **MySQL/MariaDB** y **SQL Server**, con conexión directa por IP,
-TLS y **túnel SSH**. Es el prototipo de la *Fase 0* del documento de viabilidad (Electron + TypeScript).
+Gestor de bases de datos de escritorio para **MySQL/MariaDB** y **SQL Server**, inspirado en DataGrip. Admite conexión
+directa por IP, TLS y **túnel SSH**. Está hecho con Electron, TypeScript y React.
+
+Es un proyecto de código abierto con [licencia MIT](LICENSE). Los instaladores para Linux (AppImage) y Windows están en
+[Releases](https://github.com/JesusLizAlles/gestor-bbdd/releases). Desde la versión 0.3.0, la app se actualiza sola.
 
 ## Qué hace ya
 
@@ -84,9 +87,28 @@ npm version 0.2.0 -m "Versión %s"   # cambia package.json, hace commit y crea l
 git push --follow-tags
 ```
 
-Cuando termine el flujo, la Release aparece en borrador en GitHub → Releases; se revisa y se pulsa «Publish». El flujo falla a propósito si la etiqueta no coincide con la `version` de `package.json`.
+Cuando termine el flujo, la Release aparece en borrador en GitHub → Releases. Se revisa y se pulsa «Publish»: en ese momento las apps instaladas empiezan a detectarla. El flujo falla a propósito si la etiqueta no coincide con la `version` de `package.json`.
 
 Los instaladores de Windows **no van firmados**: Windows SmartScreen avisará al instalarlos hasta que se configure un certificado de firma de código.
+
+## Actualizaciones automáticas
+
+La app usa [electron-updater](https://www.electron.build/auto-update) y busca versiones nuevas en las Releases **publicadas** de este repositorio. Los borradores no cuentan.
+
+- **Cuándo busca**: a los 10 segundos de arrancar, cada 6 horas y al pulsar el número de versión en la barra de estado.
+- **Si encuentra una versión mayor**:
+  1. Avisa sin interrumpir.
+  2. Muestra las notas de la versión.
+  3. La descarga cuando el usuario lo pide; solo baja lo que ha cambiado y comprueba la huella SHA-512.
+  4. Se instala al pulsar «Reiniciar ahora», o al cerrar la app.
+- **Windows**: el instalador se ejecuta en silencio, conserva la carpeta de instalación y vuelve a abrir la app.
+- **Linux**: funciona con el **AppImage**, que se sustituye a sí mismo. Tiene que estar en una carpeta donde el usuario pueda escribir.
+- **Sin firma de código**: la integridad de la descarga se comprueba con la huella SHA-512 de `latest.yml`. Si en el futuro se firma el instalador de Windows, electron-updater exigirá además que la versión nueva esté firmada por el mismo editor.
+- **Registro**: lo que hace el actualizador queda en `logs/updater.log`, dentro de la carpeta de datos de la app.
+
+Para publicar una actualización basta con sacar una versión, como se explica en el apartado anterior, y **publicar la Release**. El flujo sube junto a los instaladores `latest.yml`, `latest-linux.yml` y el `.blockmap`, que son los ficheros que leen las apps instaladas.
+
+La versión 0.2.0 no incluye el actualizador: hay que instalar a mano una vez la 0.3.0 o posterior.
 
 ## Arquitectura
 
@@ -162,7 +184,7 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
   - En la app: clasificación conservadora de cada sentencia.
   - En MySQL/MariaDB, además, `SET SESSION TRANSACTION READ ONLY` en el servidor.
 
-## Limitaciones conocidas del prototipo
+## Limitaciones conocidas
 
 - **SQL Server:**
   - Solo usuario y contraseña de SQL. Sin autenticación de Windows, Kerberos ni Azure AD.
@@ -187,3 +209,7 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
   - En SQL Server, paginar exige 2012 o posterior (OFFSET/FETCH).
 - **Configuración:** al editar una conexión abierta, los cambios se aplican al reconectar.
 - **Dependencias:** `npm audit` avisa de `@azure/msal-node`, que llega por `tedious` → `@azure/identity`. Solo se usa en los flujos de login de Azure AD, que esta app no activa. Se revisará cuando `@azure/identity` admita la versión corregida.
+
+## Licencia
+
+[MIT](LICENSE) © 2026 Jesús Liz Alles.

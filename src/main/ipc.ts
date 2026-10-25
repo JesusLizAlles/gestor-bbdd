@@ -6,6 +6,7 @@ import type { ConnectionConfig, DbApi, SaveConnectionInput, SecretKey } from '@s
 import { ZodError } from 'zod'
 import type { SessionManager } from './sessions'
 import type { HistoryStore } from './store/history'
+import type { Updater } from './updater'
 import type { ConnectionStore } from './store/connections'
 import type { SecretVault } from './store/secrets'
 import {
@@ -27,10 +28,11 @@ export interface IpcDeps {
   vault: SecretVault
   sessions: SessionManager
   history: HistoryStore
+  updater: Updater
   window: () => BrowserWindow | null
 }
 
-type Handlers = { [K in keyof DbApi]: (...args: unknown[]) => ReturnType<DbApi[K]> }
+type Handlers = { [K in ApiChannel]: (...args: unknown[]) => ReturnType<DbApi[K]> }
 
 function errorMessage(err: unknown): string {
   if (err instanceof ZodError) {
@@ -49,7 +51,7 @@ async function mergeSecrets(vault: SecretVault, input: SaveConnectionInput): Pro
   return stored
 }
 
-export function registerIpc({ store, vault, sessions, history, window }: IpcDeps): void {
+export function registerIpc({ store, vault, sessions, history, updater, window }: IpcDeps): void {
   const handlers: Handlers = {
     secretStorageStatus: async () => vault.status(),
     listConnections: () => store.list(),
@@ -89,6 +91,10 @@ export function registerIpc({ store, vault, sessions, history, window }: IpcDeps
     clearHistory: (id, kind, ref) =>
       history.clear(idSchema.parse(id), historyKindSchema.parse(kind), ref == null ? undefined : tableRefSchema.parse(ref)),
     cancelQuery: (id) => sessions.cancel(idSchema.parse(id)),
+    updaterState: async () => updater.get(),
+    checkForUpdates: () => updater.check(true),
+    downloadUpdate: () => updater.download(),
+    installUpdate: async () => updater.install(),
     exportFile: async (raw) => {
       const input = exportSchema.parse(raw)
       const win = window()

@@ -14,10 +14,17 @@ files:
 asarUnpack: []
 # Sin módulos nativos obligatorios (ssh2 funciona en JS puro): no recompilar nada.
 npmRebuild: false
+# Actualizaciones automáticas (electron-updater): la app busca versiones en las Releases
+# publicadas de este repositorio público. Los borradores no cuentan hasta publicarlos.
+publish:
+  provider: github
+  owner: JesusLizAlles
+  repo: gestor-bbdd
+  releaseType: release
 linux:
   target: [AppImage]
   category: Development
-  maintainer: Set Hotels
+  maintainer: Jesús Liz Alles
 win:
   target: [nsis]
 nsis:

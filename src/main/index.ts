@@ -1,6 +1,9 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { appendFile, mkdir, stat, truncate } from 'node:fs/promises'
 import { app, BrowserWindow, Menu, safeStorage, shell } from 'electron'
+import electronUpdater from 'electron-updater'
+import { UPDATE_STATE_EVENT } from '@shared/ipc'
 import { createDriver } from './drivers'
 import { registerIpc } from './ipc'
 import { SessionManager } from './sessions'
@@ -8,6 +11,7 @@ import { KnownHosts } from './ssh/known-hosts'
 import { ConnectionStore } from './store/connections'
 import { HistoryStore } from './store/history'
 import { SecretVault, type SecretCipher } from './store/secrets'
+import { Updater, type UpdaterBackend } from './updater'
 import icon from '../../resources/icon.png?asset'
 
 const here = import.meta.dirname
@@ -31,6 +35,34 @@ const electronCipher: SecretCipher = {
 }
 
 let mainWindow: BrowserWindow | null = null
+
+/** Registro del actualizador en logs/updater.log (se vacía al pasar de 1 MB). */
+function updaterLog(line: string): void {
+  const dir = app.getPath('logs')
+  const file = join(dir, 'updater.log')
+  void (async () => {
+    await mkdir(dir, { recursive: true })
+    const size = await stat(file).then((s) => s.size, () => 0)
+    if (size > 1_000_000) await truncate(file, 0)
+    await appendFile(file, `${new Date().toISOString()} ${line}\n`)
+  })().catch(() => {})
+}
+
+/** electron-updater solo sirve en la app instalada y, en Linux, si se ejecuta como AppImage. */
+function updaterBackend(): { backend: UpdaterBackend | null; reason?: string } {
+  if (!app.isPackaged) return { backend: null, reason: 'Las actualizaciones automáticas solo funcionan en la app instalada.' }
+  if (process.platform === 'linux' && !process.env.APPIMAGE) {
+    return { backend: null, reason: 'Esta instalación no es un AppImage: descarga las versiones nuevas desde GitHub.' }
+  }
+  const { autoUpdater } = electronUpdater
+  autoUpdater.logger = {
+    info: (m: unknown) => updaterLog(`INFO ${String(m)}`),
+    warn: (m: unknown) => updaterLog(`WARN ${String(m)}`),
+    error: (m: unknown) => updaterLog(`ERROR ${String(m)}`),
+    debug: (m: unknown) => updaterLog(`DEBUG ${String(m)}`)
+  }
+  return { backend: autoUpdater as unknown as UpdaterBackend }
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -90,9 +122,18 @@ app.whenReady().then(() => {
   const store = new ConnectionStore(dataDir, vault)
   const history = new HistoryStore(dataDir)
   const sessions = new SessionManager({ createDriver, knownHosts: new KnownHosts(dataDir), history })
+  const { backend, reason } = updaterBackend()
+  const updater = new Updater({
+    backend,
+    currentVersion: app.getVersion(),
+    unsupportedReason: reason,
+    send: (state) => mainWindow?.webContents.send(UPDATE_STATE_EVENT, state),
+    log: updaterLog
+  })
 
-  registerIpc({ store, vault, sessions, history, window: () => mainWindow })
+  registerIpc({ store, vault, sessions, history, updater, window: () => mainWindow })
   mainWindow = createWindow()
+  updater.startAutoCheck()
   mainWindow.on('closed', () => {
     mainWindow = null
     void sessions.closeAll()

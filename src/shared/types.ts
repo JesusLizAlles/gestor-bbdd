@@ -243,6 +243,34 @@ export interface QueryHistoryEntry {
 
 export type HistoryKind = 'queries' | 'filters'
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error'
+  | 'unsupported'
+
+/** Estado del actualizador automático, tal como lo ve la interfaz. */
+export interface UpdateState {
+  status: UpdateStatus
+  currentVersion: string
+  /** Versión nueva disponible o descargada. */
+  version?: string
+  /** Notas de la versión en texto plano. */
+  releaseNotes?: string
+  releaseDate?: string
+  /** 0–100 durante la descarga. */
+  percent?: number
+  error?: string
+  /** Por qué esta instalación no se puede actualizar sola (desarrollo, Linux sin AppImage…). */
+  reason?: string
+  /** La comprobación la pidió el usuario: la interfaz enseña el resultado aunque no haya nada nuevo. */
+  manual?: boolean
+}
+
 export interface ExportInput {
   defaultName: string
   format: 'csv' | 'json' | 'sql'
@@ -274,6 +302,13 @@ export interface DbApi {
   /** Borra el historial de consultas de la conexión, o el de filtros de una tabla (o de todas si no se indica). */
   clearHistory(connectionId: string, kind: HistoryKind, ref?: TableRef): Promise<void>
   cancelQuery(sessionId: string): Promise<void>
+  updaterState(): Promise<UpdateState>
+  checkForUpdates(): Promise<UpdateState>
+  downloadUpdate(): Promise<UpdateState>
+  /** Cierra la app, instala la versión descargada y la vuelve a abrir. */
+  installUpdate(): Promise<void>
+  /** Suscripción a los cambios de estado del actualizador; devuelve la función para darse de baja. */
+  onUpdateState(listener: (state: UpdateState) => void): () => void
   exportFile(input: ExportInput): Promise<string | null>
   pickFile(title: string): Promise<string | null>
 }

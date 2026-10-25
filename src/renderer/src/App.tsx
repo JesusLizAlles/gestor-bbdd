@@ -5,6 +5,7 @@ import { ConnectionDialog } from './components/ConnectionDialog'
 import { ConsoleView, type OpenConsole } from './components/ConsoleView'
 import { Explorer } from './components/Explorer'
 import { TableView, type OpenTable } from './components/TableView'
+import { UpdateControls } from './components/UpdateControls'
 
 interface OpenSession {
   info: SessionInfo
@@ -297,6 +298,7 @@ export function App() {
         )}
         <span className="spacer" />
         <span className="note">Doble clic: abrir tabla · Enter: editar celda · Alt+Enter: guardar · F5: recargar · Ctrl+W: cerrar</span>
+        <UpdateControls />
       </footer>
 
       {editing && (

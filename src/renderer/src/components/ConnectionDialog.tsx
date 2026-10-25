@@ -163,7 +163,7 @@ export function ConnectionDialog({ initial, secretStatus, onClose, onSaved }: Pr
           {tab === 'general' && (
             <div className="form-grid">
               <label htmlFor="conn-name">Nombre</label>
-              <input id="conn-name" autoFocus value={draft.name} placeholder="p. ej. Intranet PROD" onChange={(e) => set('name', e.target.value)} />
+              <input id="conn-name" autoFocus value={draft.name} placeholder="p. ej. Producción ventas" onChange={(e) => set('name', e.target.value)} />
               <label htmlFor="conn-engine">Motor</label>
               <select id="conn-engine" value={draft.engine} onChange={(e) => changeEngine(e.target.value as Engine)}>
                 <option value="mysql">MySQL / MariaDB</option>
