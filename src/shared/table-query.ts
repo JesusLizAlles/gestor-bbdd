@@ -1,7 +1,7 @@
 // SQL que el visor de tablas genera por detrás. Puro y sin dependencias para poder probarlo aislado.
 import { qualifiedName, quoteIdent, sqlLiteral } from './format'
 import { isReadOnlyStatement, splitStatements } from './sql'
-import type { CellValue, Engine, RowUpdate, SortSpec, TableRef } from './types'
+import type { CellChange, CellValue, Engine, RowUpdate, SortSpec, TableRef } from './types'
 
 /** `col1 = v1 AND col2 = v2`, con IS NULL para nulos. Lo usa la navegación por claves foráneas. */
 export function equalsCondition(engine: Engine, columns: string[], values: CellValue[]): string {
@@ -62,11 +62,14 @@ export function buildCountQuery(engine: Engine, ref: TableRef, where: string | n
   return `SELECT COUNT(*) AS total FROM ${from}${whereClause(where)}`
 }
 
+const keyLabel = (key: CellChange[]): string =>
+  `la fila con ${key.map((k) => `${k.column} = ${k.value === null ? 'NULL' : String(k.value)}`).join(', ')}`
+
 /** Sentencia con parámetros: `?` en MySQL, `@p0, @p1…` en SQL Server. */
 export interface ParamStatement {
   sql: string
   params: CellValue[]
-  /** Cómo nombrar la fila en los mensajes de error, p. ej. `id = 99`. */
+  /** Cómo nombrar la fila en los mensajes de error, p. ej. `la fila con id = 99`. */
   label?: string
 }
 
@@ -83,8 +86,7 @@ export function buildUpdate(engine: Engine, ref: TableRef, update: RowUpdate, pa
   }
   const set = update.set.map((c) => `${quoteIdent(c.column, engine)} = ${placeholder(c.value)}`).join(', ')
   const where = update.key.map((c) => `${quoteIdent(c.column, engine)} = ${placeholder(c.value)}`).join(' AND ')
-  const label = update.key.map((k) => `${k.column} = ${k.value === null ? 'NULL' : String(k.value)}`).join(', ')
-  return { sql: `UPDATE ${from} SET ${set} WHERE ${where}`, params, label }
+  return { sql: `UPDATE ${from} SET ${set} WHERE ${where}`, params, label: keyLabel(update.key) }
 }
 
 /** La misma sentencia con los valores en línea, solo para mostrarla al pedir confirmación. */
@@ -101,4 +103,34 @@ export function previewUpdate(engine: Engine, ref: TableRef, update: RowUpdate):
 export function mssqlDateParam(value: CellValue, dataType: string | undefined): CellValue {
   if (typeof value !== 'string' || !dataType || !/^(small)?datetime(2|offset)?\b/i.test(dataType)) return value
   return /^\d{4}-\d{2}-\d{2} \d/.test(value) ? value.replace(' ', 'T') : value
+}
+
+/** INSERT de una fila nueva. Sin columnas, la fila entera toma los valores por defecto. */
+export function buildInsert(engine: Engine, ref: TableRef, set: CellChange[], paramStart = 0, label = 'la fila nueva'): ParamStatement {
+  const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
+  if (set.length === 0) {
+    return { sql: engine === 'mysql' ? `INSERT INTO ${from} () VALUES ()` : `INSERT INTO ${from} DEFAULT VALUES`, params: [], label }
+  }
+  const params = set.map((c) => c.value)
+  const columns = set.map((c) => quoteIdent(c.column, engine)).join(', ')
+  const values = set.map((_, i) => (engine === 'mysql' ? '?' : `@p${paramStart + i}`)).join(', ')
+  return { sql: `INSERT INTO ${from} (${columns}) VALUES (${values})`, params, label }
+}
+
+/** DELETE de una fila localizada por su clave primaria. */
+export function buildDelete(engine: Engine, ref: TableRef, key: CellChange[], paramStart = 0): ParamStatement {
+  const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
+  const where = key.map((k, i) => `${quoteIdent(k.column, engine)} = ${engine === 'mysql' ? '?' : `@p${paramStart + i}`}`).join(' AND ')
+  return { sql: `DELETE FROM ${from} WHERE ${where}`, params: key.map((k) => k.value), label: keyLabel(key) }
+}
+
+export function previewInsert(engine: Engine, ref: TableRef, set: CellChange[]): string {
+  const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
+  if (set.length === 0) return engine === 'mysql' ? `INSERT INTO ${from} () VALUES ()` : `INSERT INTO ${from} DEFAULT VALUES`
+  return `INSERT INTO ${from} (${set.map((c) => quoteIdent(c.column, engine)).join(', ')}) VALUES (${set.map((c) => sqlLiteral(c.value, engine)).join(', ')})`
+}
+
+export function previewDelete(engine: Engine, ref: TableRef, key: CellChange[]): string {
+  const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
+  return `DELETE FROM ${from} WHERE ${equalsCondition(engine, key.map((k) => k.column), key.map((k) => k.value))}`
 }

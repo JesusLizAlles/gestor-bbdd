@@ -93,6 +93,8 @@ export interface ColumnInfo {
   nullable: boolean
   isPrimaryKey: boolean
   defaultValue: string | null
+  /** AUTO_INCREMENT (MySQL) o IDENTITY (SQL Server): el servidor pone el valor al insertar. */
+  autoIncrement: boolean
 }
 
 export interface CompletionColumn {
@@ -204,14 +206,21 @@ export interface RowUpdate {
   set: CellChange[]
 }
 
-export interface UpdateRowsInput extends TableRef {
-  updates: RowUpdate[]
+/** Cambios de la rejilla que se guardan juntos, en una transacción. */
+export interface RowChangesInput extends TableRef {
+  updates?: RowUpdate[]
+  /** Filas nuevas: columnas con valor; las que faltan toman su valor por defecto. */
+  inserts?: CellChange[][]
+  /** Filas a borrar, identificadas por su clave primaria (valores originales). */
+  deletes?: CellChange[][]
   /** El usuario confirmó guardar en una conexión de producción. */
   confirmedWrite?: boolean
 }
 
-export interface UpdateRowsOutput {
-  applied: number
+export interface RowChangesOutput {
+  updated: number
+  inserted: number
+  deleted: number
   /** Conexión de producción sin confirmar: no se guardó nada y se devuelve qué se haría. */
   needsConfirmation?: boolean
   preview?: string[]
@@ -239,7 +248,7 @@ export interface DbApi {
   fetchTableData(sessionId: string, input: TableDataInput): Promise<TablePage>
   countTableRows(sessionId: string, input: TableRef & { where?: string }): Promise<number>
   tableStructure(sessionId: string, ref: TableRef): Promise<TableStructure>
-  updateRows(sessionId: string, input: UpdateRowsInput): Promise<UpdateRowsOutput>
+  saveRowChanges(sessionId: string, input: RowChangesInput): Promise<RowChangesOutput>
   runQuery(sessionId: string, input: RunQueryInput): Promise<RunQueryOutput>
   cancelQuery(sessionId: string): Promise<void>
   exportFile(input: ExportInput): Promise<string | null>

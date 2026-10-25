@@ -71,6 +71,10 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
       CREATE TABLE editable (id INT PRIMARY KEY, nombre VARCHAR(40), importe DECIMAL(10,2), nota TEXT NULL);
       INSERT INTO editable VALUES (1, 'uno', 10.00, 'a'), (2, 'dos', 20.00, NULL), (3, 'tres', 30.00, NULL);
       CREATE TABLE sin_pk (a INT, b INT);
+      CREATE TABLE altas (
+        id INT PRIMARY KEY AUTO_INCREMENT, nombre VARCHAR(40) NOT NULL, estado VARCHAR(10) NOT NULL DEFAULT 'nuevo', nota TEXT NULL
+      );
+      INSERT INTO altas (nombre) VALUES ('primera'), ('segunda');
     `)
   })
 
@@ -306,14 +310,14 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
     const read = async () => (await sessions.fetchTableData(sessionId, { ...editable, offset: 0, limit: 10, sort: [] })).rows
 
     it('guarda varios cambios en una transacción', async () => {
-      const out = await sessions.updateRows(sessionId, {
+      const out = await sessions.saveRowChanges(sessionId, {
         ...editable,
         updates: [
           { key: [{ column: 'id', value: 1 }], set: [{ column: 'nombre', value: "Uno 'editado'" }, { column: 'nota', value: null }] },
           { key: [{ column: 'id', value: 2 }], set: [{ column: 'importe', value: '25.5' }] }
         ]
       })
-      expect(out).toEqual({ applied: 2 })
+      expect(out).toEqual({ updated: 2, inserted: 0, deleted: 0 })
       expect(await read()).toEqual([
         [1, "Uno 'editado'", '10.00', null],
         [2, 'dos', '25.50', null],
@@ -323,13 +327,13 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
 
     it('guardar el mismo valor que ya tenía no se toma como fila perdida', async () => {
       await expect(
-        sessions.updateRows(sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 3 }], set: [{ column: 'nombre', value: 'tres' }] }] })
-      ).resolves.toEqual({ applied: 1 })
+        sessions.saveRowChanges(sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 3 }], set: [{ column: 'nombre', value: 'tres' }] }] })
+      ).resolves.toEqual({ updated: 1, inserted: 0, deleted: 0 })
     })
 
     it('si una fila ya no existe no se guarda nada (rollback de todo el lote)', async () => {
       await expect(
-        sessions.updateRows(sessionId, {
+        sessions.saveRowChanges(sessionId, {
           ...editable,
           updates: [
             { key: [{ column: 'id', value: 3 }], set: [{ column: 'nombre', value: 'no debe quedar' }] },
@@ -342,7 +346,7 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
 
     it('devuelve el error del servidor y deshace si un valor no es válido', async () => {
       await expect(
-        sessions.updateRows(sessionId, {
+        sessions.saveRowChanges(sessionId, {
           ...editable,
           updates: [
             { key: [{ column: 'id', value: 3 }], set: [{ column: 'nombre', value: 'tampoco' }] },
@@ -355,16 +359,16 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
 
     it('exige identificar la fila por toda la clave primaria y columnas existentes', async () => {
       await expect(
-        sessions.updateRows(sessionId, { ...editable, updates: [{ key: [{ column: 'nombre', value: 'tres' }], set: [{ column: 'nota', value: 'x' }] }] })
+        sessions.saveRowChanges(sessionId, { ...editable, updates: [{ key: [{ column: 'nombre', value: 'tres' }], set: [{ column: 'nota', value: 'x' }] }] })
       ).rejects.toThrow(/toda su clave primaria/)
       await expect(
-        sessions.updateRows(sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 3 }], set: [{ column: 'nope', value: 'x' }] }] })
+        sessions.saveRowChanges(sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 3 }], set: [{ column: 'nope', value: 'x' }] }] })
       ).rejects.toThrow(/no existe/)
     })
 
     it('no permite editar tablas sin clave primaria', async () => {
       await expect(
-        sessions.updateRows(sessionId, {
+        sessions.saveRowChanges(sessionId, {
           database: DB,
           schema: null,
           table: 'sin_pk',
@@ -377,15 +381,91 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
       const prod = await sessions.open({ ...config, id: 'prod-edit', environment: 'prod' }, { password })
       try {
         const updates = [{ key: [{ column: 'id', value: 3 }], set: [{ column: 'nota', value: 'confirmado' }] }]
-        const first = await sessions.updateRows(prod.sessionId, { ...editable, updates })
+        const first = await sessions.saveRowChanges(prod.sessionId, { ...editable, updates })
         expect(first).toEqual({
-          applied: 0,
+          updated: 0,
+          inserted: 0,
+          deleted: 0,
           needsConfirmation: true,
           preview: [`UPDATE \`${DB}\`.\`editable\` SET \`nota\` = 'confirmado' WHERE \`id\` = 3`]
         })
         expect((await read())[2]![3]).toBeNull()
-        await expect(sessions.updateRows(prod.sessionId, { ...editable, updates, confirmedWrite: true })).resolves.toEqual({ applied: 1 })
+        await expect(sessions.saveRowChanges(prod.sessionId, { ...editable, updates, confirmedWrite: true })).resolves.toEqual({ updated: 1, inserted: 0, deleted: 0 })
         expect((await read())[2]![3]).toBe('confirmado')
+      } finally {
+        await sessions.close(prod.sessionId)
+      }
+    })
+
+    it('da de alta filas con valores por defecto y autoincremento', async () => {
+      const altas = { database: DB, schema: null, table: 'altas' }
+      const out = await sessions.saveRowChanges(sessionId, {
+        ...altas,
+        inserts: [[{ column: 'nombre', value: 'tercera' }], [{ column: 'nombre', value: 'cuarta' }, { column: 'nota', value: 'con nota' }]]
+      })
+      expect(out).toEqual({ updated: 0, inserted: 2, deleted: 0 })
+      const page = await sessions.fetchTableData(sessionId, { ...altas, offset: 0, limit: 10, sort: [] })
+      expect(page.rows.slice(2)).toEqual([
+        [3, 'tercera', 'nuevo', null],
+        [4, 'cuarta', 'nuevo', 'con nota']
+      ])
+      const structure = await sessions.tableStructure(sessionId, altas)
+      expect(structure.columns.map((c) => c.autoIncrement)).toEqual([true, false, false, false])
+    })
+
+    it('borra, modifica y da de alta en una sola transacción (borrar y recrear la misma clave)', async () => {
+      const altas = { database: DB, schema: null, table: 'altas' }
+      const out = await sessions.saveRowChanges(sessionId, {
+        ...altas,
+        deletes: [[{ column: 'id', value: 1 }], [{ column: 'id', value: 4 }]],
+        updates: [{ key: [{ column: 'id', value: 2 }], set: [{ column: 'estado', value: 'revisado' }] }],
+        inserts: [[{ column: 'id', value: 1 }, { column: 'nombre', value: 'recreada' }]]
+      })
+      expect(out).toEqual({ updated: 1, inserted: 1, deleted: 2 })
+      const page = await sessions.fetchTableData(sessionId, { ...altas, offset: 0, limit: 10, sort: [] })
+      expect(page.rows).toEqual([
+        [1, 'recreada', 'nuevo', null],
+        [2, 'segunda', 'revisado', null],
+        [3, 'tercera', 'nuevo', null]
+      ])
+    })
+
+    it('si un alta falla, los borrados del mismo guardado se deshacen', async () => {
+      const altas = { database: DB, schema: null, table: 'altas' }
+      await expect(
+        sessions.saveRowChanges(sessionId, {
+          ...altas,
+          deletes: [[{ column: 'id', value: 3 }]],
+          // nombre es NOT NULL sin valor por defecto.
+          inserts: [[{ column: 'nota', value: 'sin nombre' }]]
+        })
+      ).rejects.toThrow(/nombre/)
+      expect(await sessions.countTableRows(sessionId, { ...altas, where: 'id = 3' })).toBe(1)
+    })
+
+    it('borrar una fila que ya no existe no borra nada', async () => {
+      const altas = { database: DB, schema: null, table: 'altas' }
+      await expect(
+        sessions.saveRowChanges(sessionId, { ...altas, deletes: [[{ column: 'id', value: 2 }], [{ column: 'id', value: 404 }]] })
+      ).rejects.toThrow(/la fila con id = 404 ya no existe/)
+      expect(await sessions.countTableRows(sessionId, altas)).toBe(3)
+    })
+
+    it('en producción la vista previa incluye borrados, cambios y altas en orden', async () => {
+      const prod = await sessions.open({ ...config, id: 'prod-altas', environment: 'prod' }, { password })
+      try {
+        const out = await sessions.saveRowChanges(prod.sessionId, {
+          database: DB,
+          schema: null,
+          table: 'altas',
+          inserts: [[{ column: 'nombre', value: 'x' }]],
+          deletes: [[{ column: 'id', value: 3 }]]
+        })
+        expect(out.needsConfirmation).toBe(true)
+        expect(out.preview).toEqual([
+          `DELETE FROM \`${DB}\`.\`altas\` WHERE \`id\` = 3`,
+          `INSERT INTO \`${DB}\`.\`altas\` (\`nombre\`) VALUES ('x')`
+        ])
       } finally {
         await sessions.close(prod.sessionId)
       }
@@ -395,7 +475,7 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
       const ro = await sessions.open({ ...config, id: 'ro-edit', readOnly: true }, { password })
       try {
         await expect(
-          sessions.updateRows(ro.sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 1 }], set: [{ column: 'nota', value: 'x' }] }] })
+          sessions.saveRowChanges(ro.sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 1 }], set: [{ column: 'nota', value: 'x' }] }] })
         ).rejects.toThrow(/solo lectura/)
       } finally {
         await sessions.close(ro.sessionId)

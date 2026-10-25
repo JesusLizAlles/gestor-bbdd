@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { buildCountQuery, buildPageQuery, buildUpdate, equalsCondition, mssqlDateParam, previewUpdate, validateWhere } from '@shared/table-query'
+import {
+  buildCountQuery,
+  buildDelete,
+  buildInsert,
+  buildPageQuery,
+  buildUpdate,
+  equalsCondition,
+  mssqlDateParam,
+  previewDelete,
+  previewInsert,
+  previewUpdate,
+  validateWhere
+} from '@shared/table-query'
 
 const my = { database: 'hotel', schema: null, table: 'reservas' }
 const ms = { database: 'SAGE', schema: 'dbo', table: 'Clientes' }
@@ -93,7 +105,7 @@ describe('buildUpdate / previewUpdate', () => {
     expect(buildUpdate('mysql', my, update)).toEqual({
       sql: 'UPDATE `hotel`.`reservas` SET `nombre` = ?, `nota` = ? WHERE `id` = ?',
       params: ["O'Brien", null, 7],
-      label: 'id = 7'
+      label: 'la fila con id = 7'
     })
   })
 
@@ -101,7 +113,7 @@ describe('buildUpdate / previewUpdate', () => {
     expect(buildUpdate('mssql', ms, update, 3)).toEqual({
       sql: 'UPDATE [SAGE].[dbo].[Clientes] SET [nombre] = @p3, [nota] = @p4 WHERE [id] = @p5',
       params: ["O'Brien", null, 7],
-      label: 'id = 7'
+      label: 'la fila con id = 7'
     })
   })
 
@@ -117,5 +129,37 @@ describe('mssqlDateParam', () => {
     expect(mssqlDateParam('2026-07-01 10:30', 'nvarchar(50)')).toBe('2026-07-01 10:30')
     expect(mssqlDateParam('2026-07-01', 'date')).toBe('2026-07-01')
     expect(mssqlDateParam(5, 'datetime')).toBe(5)
+  })
+})
+
+describe('buildInsert / buildDelete', () => {
+  const set = [{ column: 'nombre', value: 'Nuevo' }, { column: 'nota', value: null }]
+
+  it('INSERT con parámetros en ambos motores', () => {
+    expect(buildInsert('mysql', my, set)).toEqual({
+      sql: 'INSERT INTO `hotel`.`reservas` (`nombre`, `nota`) VALUES (?, ?)',
+      params: ['Nuevo', null],
+      label: 'la fila nueva'
+    })
+    expect(buildInsert('mssql', ms, set, 2, 'la fila nueva 1').sql).toBe('INSERT INTO [SAGE].[dbo].[Clientes] ([nombre], [nota]) VALUES (@p2, @p3)')
+  })
+
+  it('INSERT sin columnas usa todos los valores por defecto', () => {
+    expect(buildInsert('mysql', my, []).sql).toBe('INSERT INTO `hotel`.`reservas` () VALUES ()')
+    expect(buildInsert('mssql', ms, []).sql).toBe('INSERT INTO [SAGE].[dbo].[Clientes] DEFAULT VALUES')
+  })
+
+  it('DELETE por clave primaria compuesta', () => {
+    const key = [{ column: 'hotel', value: 3 }, { column: 'fecha', value: '2026-07-01' }]
+    expect(buildDelete('mssql', ms, key, 5)).toEqual({
+      sql: 'DELETE FROM [SAGE].[dbo].[Clientes] WHERE [hotel] = @p5 AND [fecha] = @p6',
+      params: [3, '2026-07-01'],
+      label: 'la fila con hotel = 3, fecha = 2026-07-01'
+    })
+  })
+
+  it('vistas previas con literales', () => {
+    expect(previewInsert('mysql', my, set)).toBe("INSERT INTO `hotel`.`reservas` (`nombre`, `nota`) VALUES ('Nuevo', NULL)")
+    expect(previewDelete('mssql', ms, [{ column: 'id', value: 4 }])).toBe('DELETE FROM [SAGE].[dbo].[Clientes] WHERE [id] = 4')
   })
 })

@@ -18,7 +18,7 @@ export const API_CHANNELS = [
   'fetchTableData',
   'countTableRows',
   'tableStructure',
-  'updateRows',
+  'saveRowChanges',
   'runQuery',
   'cancelQuery',
   'exportFile',

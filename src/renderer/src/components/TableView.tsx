@@ -6,6 +6,7 @@ import type {
   ConnectionSummary,
   ForeignKeyInfo,
   ObjectKind,
+  CellChange,
   QueryResult,
   RowUpdate,
   SortSpec,
@@ -15,7 +16,7 @@ import type {
 } from '@shared/types'
 import { PAGE_SIZES } from '@shared/types'
 import { ConfirmDialog } from './ConfirmDialog'
-import { DataGrid, type PendingEdits } from './DataGrid'
+import { DataGrid, type FocusRequest, type PendingEdits } from './DataGrid'
 
 export interface OpenTable {
   type: 'table'
@@ -47,6 +48,16 @@ function readPageSize(): number {
   }
 }
 
+/** Cambios sin guardar de la rejilla. Las filas nuevas van detrás de las de la página. */
+interface Changes {
+  edits: PendingEdits
+  newRows: number
+  deleted: Set<number>
+}
+
+const NO_CHANGES: Changes = { edits: new Map(), newRows: 0, deleted: new Set() }
+const hasChanges = (c: Changes): boolean => c.edits.size > 0 || c.newRows > 0 || c.deleted.size > 0
+
 const tableLabel = (ref: TableRef) => (ref.schema && ref.schema !== 'dbo' ? `${ref.schema}.${ref.table}` : ref.table)
 
 /** Visor de una tabla al estilo DataGrip: los datos son la pantalla; la SQL se genera por detrás. */
@@ -69,12 +80,14 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
   const [notice, setNotice] = useState<string | null>(null)
   const requestId = useRef(0)
   // Edición: cambios sin guardar. La referencia permite guardar justo después de confirmar una celda.
-  const [pending, setPendingState] = useState<PendingEdits>(new Map())
-  const pendingRef = useRef<PendingEdits>(pending)
-  const setPending = (next: PendingEdits) => {
-    pendingRef.current = next
-    setPendingState(next)
+  const [changes, setChangesState] = useState<Changes>(NO_CHANGES)
+  const changesRef = useRef<Changes>(changes)
+  const setChanges = (next: Changes) => {
+    changesRef.current = next
+    setChangesState(next)
   }
+  const [selectedRows, setSelectedRows] = useState<number[]>([])
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmPreview, setConfirmPreview] = useState<string[] | null>(null)
@@ -89,7 +102,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
       .then((result) => {
         if (id !== requestId.current) return
         setPage(result)
-        setPending(new Map())
+        setChanges(NO_CHANGES)
         setSaveError(null)
       })
       .catch((err: Error) => {
@@ -122,9 +135,9 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
 
   /** Antes de cambiar de página, orden o filtro: los cambios sin guardar se perderían. */
   const discardPending = (): boolean => {
-    if (pendingRef.current.size === 0) return true
+    if (!hasChanges(changesRef.current)) return true
     if (!window.confirm('Hay cambios sin guardar en esta tabla. ¿Descartarlos?')) return false
-    setPending(new Map())
+    setChanges(NO_CHANGES)
     return true
   }
 
@@ -208,38 +221,104 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
   const editable =
     !readOnlyReason && ready !== null && page !== null && pkColumns.every((pk) => page.columns.some((c) => c.name === pk))
 
+  const base = page?.rows.length ?? 0
+
+  // Texto de las celdas aún vacías de una fila nueva: qué recibirán si no se rellenan.
+  const placeholders = useMemo(
+    () =>
+      (page?.columns ?? []).map((c) => {
+        const info = ready?.columns.find((x) => x.name === c.name)
+        if (!info) return ''
+        if (info.autoIncrement) return '(auto)'
+        if (info.defaultValue !== null && info.defaultValue.toUpperCase() !== 'NULL') return `(${info.defaultValue})`
+        return info.nullable ? 'NULL' : '(obligatorio)'
+      }),
+    [page, ready]
+  )
+
   const editCell = (row: number, col: number, value: CellValue) => {
+    const current = changesRef.current
+    const edits: PendingEdits = new Map([...current.edits].map(([r, cols]) => [r, new Map(cols)]))
+    const cols = edits.get(row) ?? new Map<number, CellValue>()
+    // En filas existentes, volver al valor original quita el cambio; en filas nuevas todo cuenta.
     const original = page?.rows[row]?.[col] ?? null
-    const same = value === original || (value !== null && original !== null && String(value) === String(original))
-    const next: PendingEdits = new Map([...pendingRef.current].map(([r, cols]) => [r, new Map(cols)]))
-    const cols = next.get(row) ?? new Map<number, CellValue>()
+    const same = row < base && (value === original || (value !== null && original !== null && String(value) === String(original)))
     if (same) cols.delete(col)
     else cols.set(col, value)
-    if (cols.size) next.set(row, cols)
-    else next.delete(row)
-    setPending(next)
+    if (cols.size) edits.set(row, cols)
+    else edits.delete(row)
+    setChanges({ ...current, edits })
+    setSaveError(null)
+    setNotice(null)
+  }
+
+  const addRow = () => {
+    if (!editable || !page) return
+    const current = changesRef.current
+    const row = base + current.newRows
+    setChanges({ ...current, newRows: current.newRows + 1 })
+    // Se empieza a editar la primera columna que no rellena el servidor.
+    const firstCol = Math.max(0, placeholders.findIndex((p) => p !== '(auto)'))
+    setFocusRequest({ row, col: firstCol, edit: true, nonce: Date.now() })
+    setSaveError(null)
+    setNotice(null)
+  }
+
+  /** Marca (o desmarca) filas existentes para borrar; las nuevas simplemente se quitan. */
+  const deleteRows = (rows: number[]) => {
+    if (!editable || rows.length === 0) return
+    const current = changesRef.current
+    const existing = rows.filter((r) => r < base)
+    const deleted = new Set(current.deleted)
+    const restore = existing.length > 0 && existing.every((r) => deleted.has(r))
+    for (const r of existing) {
+      if (restore) deleted.delete(r)
+      else deleted.add(r)
+    }
+    // Quitar filas nuevas desplaza las ediciones de las nuevas que van detrás.
+    const removed = new Set(rows.filter((r) => r >= base))
+    let edits = current.edits
+    if (removed.size) {
+      edits = new Map()
+      for (const [r, cols] of current.edits) {
+        if (removed.has(r)) continue
+        const shift = r >= base ? [...removed].filter((x) => x < r).length : 0
+        edits.set(r - shift, cols)
+      }
+    }
+    setChanges({ edits, newRows: current.newRows - removed.size, deleted })
     setSaveError(null)
     setNotice(null)
   }
 
   const save = async (confirmedWrite = false) => {
-    const current = pendingRef.current
-    if (!page || current.size === 0 || saving) return
+    const { edits, newRows, deleted } = changesRef.current
+    if (!page || !hasChanges(changesRef.current) || saving) return
     const colIndex = (name: string) => page.columns.findIndex((c) => c.name === name)
-    const updates: RowUpdate[] = [...current].map(([row, cols]) => ({
-      key: pkColumns.map((pk) => ({ column: pk, value: page.rows[row]?.[colIndex(pk)] ?? null })),
-      set: [...cols].map(([col, value]) => ({ column: page.columns[col]!.name, value }))
-    }))
+    const keyOf = (row: number): CellChange[] =>
+      pkColumns.map((pk) => ({ column: pk, value: page.rows[row]?.[colIndex(pk)] ?? null }))
+    const toChanges = (cols: Map<number, CellValue>): CellChange[] =>
+      [...cols].map(([col, value]) => ({ column: page.columns[col]!.name, value }))
+    const updates: RowUpdate[] = [...edits]
+      .filter(([row]) => row < base && !deleted.has(row))
+      .map(([row, cols]) => ({ key: keyOf(row), set: toChanges(cols) }))
+    const inserts = Array.from({ length: newRows }, (_, i) => toChanges(edits.get(base + i) ?? new Map()))
+    const deletes = [...deleted].sort((a, b) => a - b).map(keyOf)
     setSaving(true)
     setSaveError(null)
     try {
-      const out = await window.api.updateRows(sessionId, { ...ref, updates, confirmedWrite })
+      const out = await window.api.saveRowChanges(sessionId, { ...ref, updates, inserts, deletes, confirmedWrite })
       if (out.needsConfirmation) {
         setConfirmPreview(out.preview ?? [])
         return
       }
-      setNotice(`${out.applied} fila${out.applied === 1 ? '' : 's'} guardada${out.applied === 1 ? '' : 's'}`)
-      setPending(new Map())
+      const parts = [
+        out.updated && `${out.updated} modificada${out.updated === 1 ? '' : 's'}`,
+        out.inserted && `${out.inserted} añadida${out.inserted === 1 ? '' : 's'}`,
+        out.deleted && `${out.deleted} borrada${out.deleted === 1 ? '' : 's'}`
+      ].filter(Boolean)
+      setNotice(`Guardado: ${parts.join(', ')}`)
+      setChanges(NO_CHANGES)
       setReload((n) => n + 1)
     } catch (err) {
       setSaveError((err as Error).message)
@@ -248,8 +327,26 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
     }
   }
 
-  const pendingRows = pending.size
-  const pendingCells = [...pending.values()].reduce((n, cols) => n + cols.size, 0)
+  // Alt+Insert también funciona con el foco fuera de la rejilla (p. ej. tras pulsar un botón).
+  useEffect(() => {
+    if (!active || view !== 'data') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey && e.key === 'Insert' && !(e.target as HTMLElement).closest('.grid')) {
+        e.preventDefault()
+        addRow()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const modifiedRows = [...changes.edits.keys()].filter((r) => r < base && !changes.deleted.has(r)).length
+  const summary = [
+    modifiedRows && `${modifiedRows} fila${modifiedRows === 1 ? '' : 's'} modificada${modifiedRows === 1 ? '' : 's'}`,
+    changes.newRows && `${changes.newRows} nueva${changes.newRows === 1 ? '' : 's'}`,
+    changes.deleted.size && `${changes.deleted.size} para borrar`
+  ].filter(Boolean)
+  const pendingAny = hasChanges(changes)
 
   const navigateFk = (fk: ForeignKeyInfo, row: CellValue[]) => {
     if (!page) return
@@ -391,6 +488,17 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
                 </button>
               )}
             </div>
+            <button className="compact" disabled={!editable || loading} title="Añadir fila (Alt+Insert)" onClick={addRow}>
+              ＋ Fila
+            </button>
+            <button
+              className="compact"
+              disabled={!editable || selectedRows.length === 0}
+              title="Borrar o restaurar las filas seleccionadas (Ctrl+Supr)"
+              onClick={() => deleteRows(selectedRows)}
+            >
+              － Fila
+            </button>
             <select
               className="compact"
               value=""
@@ -425,18 +533,18 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         </button>
       </div>
 
-      {view === 'data' && (pendingRows > 0 || saveError) && (
+      {view === 'data' && (pendingAny || saveError) && (
         <div className={`edit-bar ${saveError ? 'error' : ''}`} role="status">
           {saveError ? (
             <span>{saveError}</span>
           ) : (
             <span>
-              ✎ {pendingCells} cambio{pendingCells === 1 ? '' : 's'} en {pendingRows} fila{pendingRows === 1 ? '' : 's'} sin guardar ·{' '}
+              ✎ Sin guardar: {summary.join(' · ')} ·{' '}
               <kbd>Alt</kbd>+<kbd>Enter</kbd> para guardar
             </span>
           )}
           <span className="spacer" />
-          {pendingRows > 0 && (
+          {pendingAny && (
             <>
               <button className="compact primary" disabled={saving} onClick={() => void save()}>
                 {saving ? 'Guardando…' : 'Guardar'}
@@ -445,7 +553,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
                 className="compact"
                 disabled={saving}
                 onClick={() => {
-                  setPending(new Map())
+                  setChanges(NO_CHANGES)
                   setSaveError(null)
                 }}
               >
@@ -474,9 +582,16 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
               primaryKey={primaryKey}
               foreignKeys={foreignKeys}
               onNavigate={navigateFk}
-              pending={pending}
+              pending={changes.edits}
+              newRows={changes.newRows}
+              deleted={changes.deleted}
+              placeholders={placeholders}
               onEdit={editable ? editCell : undefined}
               onSubmit={() => void save()}
+              onAddRow={editable ? addRow : undefined}
+              onDeleteRows={editable ? deleteRows : undefined}
+              onSelectionChange={setSelectedRows}
+              focusRequest={focusRequest}
             />
           )}
           {!error && !page && <div className="grid-empty">Cargando…</div>}
@@ -513,7 +628,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         )}
         {where && view === 'data' && <span className="filter-chip">Filtrado</span>}
         {view === 'data' && readOnlyReason && <span>{readOnlyReason}</span>}
-        {view === 'data' && editable && <span>Enter o doble clic para editar</span>}
+        {view === 'data' && editable && <span>Enter: editar · Alt+Insert: fila nueva · Ctrl+Supr: borrar</span>}
         {sort[0] && view === 'data' && (
           <span>
             Orden: {sort[0].column} {sort[0].direction === 'asc' ? '▲' : '▼'}

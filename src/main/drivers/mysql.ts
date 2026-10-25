@@ -52,8 +52,8 @@ const quoteIdent = (name: string): string => `\`${name.replace(/`/g, '``')}\``
 export function rowChangedError(label: string, affected: number): Error {
   return new Error(
     affected === 0
-      ? `No se guardó nada: la fila con ${label} ya no existe o su clave ha cambiado. Recarga la tabla.`
-      : `No se guardó nada: el cambio de la fila con ${label} afectaría a ${affected} filas en lugar de a una.`
+      ? `No se guardó nada: ${label} ya no existe o su clave ha cambiado. Recarga la tabla.`
+      : `No se guardó nada: el cambio de ${label} afectaría a ${affected} filas en lugar de a una.`
   )
 }
 
@@ -108,8 +108,9 @@ export class MysqlDriver implements DbDriver {
   }
 
   async listColumns(database: string, table: string): Promise<ColumnInfo[]> {
-    const rows = await this.metaRows<{ name: string; type: string; nullable: string; ckey: string; def: string | null }>(
-      `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, IS_NULLABLE AS nullable, COLUMN_KEY AS ckey, COLUMN_DEFAULT AS def
+    const rows = await this.metaRows<{ name: string; type: string; nullable: string; ckey: string; def: string | null; extra: string }>(
+      `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, IS_NULLABLE AS nullable, COLUMN_KEY AS ckey, COLUMN_DEFAULT AS def,
+              EXTRA AS extra
          FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`,
       [database, table]
     )
@@ -118,7 +119,8 @@ export class MysqlDriver implements DbDriver {
       dataType: String(r.type),
       nullable: r.nullable === 'YES',
       isPrimaryKey: r.ckey === 'PRI',
-      defaultValue: r.def === null ? null : String(r.def)
+      defaultValue: r.def === null ? null : String(r.def),
+      autoIncrement: /auto_increment/i.test(r.extra ?? '')
     }))
   }
 
@@ -224,12 +226,12 @@ export class MysqlDriver implements DbDriver {
     })
   }
 
-  async executeUpdates(statements: ParamStatement[]): Promise<void> {
+  async executeChanges(statements: ParamStatement[]): Promise<void> {
     const conn = this.requireQuery()
     await this.run(conn, 'START TRANSACTION')
     try {
       for (const [i, st] of statements.entries()) {
-        const label = st.label ?? `nº ${i + 1}`
+        const label = st.label ?? `el cambio nº ${i + 1}`
         // Con FOUND_ROWS (activo por defecto en mysql2) cuenta filas encontradas, no solo modificadas.
         const header = await new Promise<ResultSetHeader>((resolve, reject) =>
           conn.query(st.sql, st.params, (err, result) => (err ? reject(err) : resolve(result as ResultSetHeader)))

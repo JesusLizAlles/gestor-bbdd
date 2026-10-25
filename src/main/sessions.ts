@@ -17,16 +17,20 @@ import type {
   TablePage,
   TableRef,
   TableStructure,
-  UpdateRowsInput,
-  UpdateRowsOutput
+  RowChangesInput,
+  RowChangesOutput
 } from '@shared/types'
 import { DEFAULT_MAX_ROWS } from '@shared/types'
 import { isReadOnlyStatement, splitStatements } from '@shared/sql'
 import {
   buildCountQuery,
+  buildDelete,
+  buildInsert,
   buildPageQuery,
   buildUpdate,
   mssqlDateParam,
+  previewDelete,
+  previewInsert,
   previewUpdate,
   validateWhere,
   type ParamStatement
@@ -198,45 +202,86 @@ export class SessionManager {
     return Number(result?.rows[0]?.[0] ?? 0)
   }
 
-  /** Guarda cambios hechos en la rejilla: un UPDATE por fila, localizada por su clave primaria. */
-  async updateRows(sessionId: string, input: UpdateRowsInput): Promise<UpdateRowsOutput> {
+  /**
+   * Guarda los cambios de la rejilla en una transacción: primero borrados, luego modificaciones y
+   * por último altas (así se puede borrar una fila y volver a crearla con la misma clave).
+   */
+  async saveRowChanges(sessionId: string, input: RowChangesInput): Promise<RowChangesOutput> {
     const session = this.get(sessionId)
     const { engine, readOnly, environment } = session.config
     if (readOnly) throw new Error('Conexión de solo lectura: no se pueden guardar cambios')
-    if (input.updates.length === 0) return { applied: 0 }
+    const none: RowChangesOutput = { updated: 0, inserted: 0, deleted: 0 }
+    const updatesIn = input.updates ?? []
+    const insertsIn = input.inserts ?? []
+    const deletesIn = input.deletes ?? []
+    if (updatesIn.length + insertsIn.length + deletesIn.length === 0) return none
 
     const ref: TableRef = { database: input.database, schema: input.schema, table: input.table }
     const columns = await this.tableColumns(session, ref)
     const pk = columns.filter((c) => c.isPrimaryKey).map((c) => c.name)
-    if (pk.length === 0) throw new Error(`${ref.table} no tiene clave primaria: no se puede editar desde la rejilla`)
+    if (pk.length === 0 && updatesIn.length + deletesIn.length > 0) {
+      throw new Error(`${ref.table} no tiene clave primaria: no se pueden modificar ni borrar filas desde la rejilla`)
+    }
     const types = new Map(columns.map((c) => [c.name, c.dataType]))
-
-    const updates = input.updates.map((u) => {
-      const keyColumns = u.key.map((k) => k.column).sort()
-      if (keyColumns.join('\u0000') !== [...pk].sort().join('\u0000')) {
-        throw new Error('Cada cambio debe identificar la fila por toda su clave primaria')
+    const pkSignature = [...pk].sort().join('\u0000')
+    const checkKey = (key: CellChange[]) => {
+      if (key.map((k) => k.column).sort().join('\u0000') !== pkSignature) {
+        throw new Error('Cada fila debe identificarse por toda su clave primaria')
       }
+    }
+    const checkColumns = (set: CellChange[]) => {
+      const seen = new Set<string>()
+      for (const c of set) {
+        if (!types.has(c.column)) throw new Error(`La columna ${c.column} no existe en ${ref.table}`)
+        if (seen.has(c.column)) throw new Error(`La columna ${c.column} aparece dos veces en la misma fila`)
+        seen.add(c.column)
+      }
+    }
+    // SQL Server: fechas en formato ISO para que no dependan de SET DATEFORMAT.
+    const fix = (c: CellChange): CellChange => ({
+      column: c.column,
+      value: engine === 'mssql' ? mssqlDateParam(c.value, types.get(c.column)) : c.value
+    })
+
+    const deletes = deletesIn.map((key) => {
+      checkKey(key)
+      return key.map(fix)
+    })
+    const updates = updatesIn.map((u) => {
+      checkKey(u.key)
       if (u.set.length === 0) throw new Error('Hay un cambio sin columnas que modificar')
-      for (const c of u.set) if (!types.has(c.column)) throw new Error(`La columna ${c.column} no existe en ${ref.table}`)
-      const fix = (c: CellChange): CellChange => ({
-        column: c.column,
-        value: engine === 'mssql' ? mssqlDateParam(c.value, types.get(c.column)) : c.value
-      })
+      checkColumns(u.set)
       return { key: u.key.map(fix), set: u.set.map(fix) }
+    })
+    const inserts = insertsIn.map((set) => {
+      checkColumns(set)
+      return set.map(fix)
     })
 
     if (environment === 'prod' && !input.confirmedWrite) {
-      return { applied: 0, needsConfirmation: true, preview: updates.map((u) => previewUpdate(engine, ref, u)) }
+      return {
+        ...none,
+        needsConfirmation: true,
+        preview: [
+          ...deletes.map((key) => previewDelete(engine, ref, key)),
+          ...updates.map((u) => previewUpdate(engine, ref, u)),
+          ...inserts.map((set) => previewInsert(engine, ref, set))
+        ]
+      }
     }
 
     let paramIndex = 0
-    const statements: ParamStatement[] = updates.map((u) => {
-      const st = buildUpdate(engine, ref, u, paramIndex)
+    const numbered = (st: ParamStatement): ParamStatement => {
       paramIndex += st.params.length
       return st
-    })
-    await this.exclusive(session, () => session.driver.executeUpdates(statements))
-    return { applied: statements.length }
+    }
+    const statements: ParamStatement[] = [
+      ...deletes.map((key) => numbered(buildDelete(engine, ref, key, paramIndex))),
+      ...updates.map((u) => numbered(buildUpdate(engine, ref, u, paramIndex))),
+      ...inserts.map((set, i) => numbered(buildInsert(engine, ref, set, paramIndex, `la fila nueva ${i + 1}`)))
+    ]
+    await this.exclusive(session, () => session.driver.executeChanges(statements))
+    return { updated: updates.length, inserted: inserts.length, deleted: deletes.length }
   }
 
   async tableStructure(sessionId: string, ref: TableRef): Promise<TableStructure> {

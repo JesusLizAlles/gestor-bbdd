@@ -72,7 +72,7 @@ export class MssqlDriver implements DbDriver {
 
   async listColumns(database: string, table: string, schema: string | null): Promise<ColumnInfo[]> {
     const db = quoteIdent(database)
-    const rows = await this.metaRows<{ name: string; dataType: string; nullable: string; def: string | null; pk: number }>(
+    const rows = await this.metaRows<{ name: string; dataType: string; nullable: string; def: string | null; pk: number; ident: number | null }>(
       `SELECT c.COLUMN_NAME AS name,
               c.DATA_TYPE + CASE
                 WHEN c.CHARACTER_MAXIMUM_LENGTH = -1 THEN '(max)'
@@ -87,7 +87,9 @@ export class MssqlDriver implements DbDriver {
                     ON k.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND k.TABLE_SCHEMA = tc.TABLE_SCHEMA
                  WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = c.TABLE_SCHEMA
                    AND tc.TABLE_NAME = c.TABLE_NAME AND k.COLUMN_NAME = c.COLUMN_NAME
-              ) THEN 1 ELSE 0 END AS pk
+              ) THEN 1 ELSE 0 END AS pk,
+              COLUMNPROPERTY(OBJECT_ID(QUOTENAME(c.TABLE_CATALOG) + '.' + QUOTENAME(c.TABLE_SCHEMA) + '.' + QUOTENAME(c.TABLE_NAME)),
+                             c.COLUMN_NAME, 'IsIdentity') AS ident
          FROM ${db}.INFORMATION_SCHEMA.COLUMNS c
         WHERE c.TABLE_SCHEMA = @schema AND c.TABLE_NAME = @table
         ORDER BY c.ORDINAL_POSITION`,
@@ -98,7 +100,8 @@ export class MssqlDriver implements DbDriver {
       dataType: r.dataType,
       nullable: r.nullable === 'YES',
       isPrimaryKey: r.pk === 1,
-      defaultValue: r.def
+      defaultValue: r.def,
+      autoIncrement: r.ident === 1
     }))
   }
 
@@ -220,15 +223,15 @@ export class MssqlDriver implements DbDriver {
     })
   }
 
-  async executeUpdates(statements: ParamStatement[]): Promise<void> {
+  async executeChanges(statements: ParamStatement[]): Promise<void> {
     // Un solo lote: XACT_ABORT deshace la transacción entera ante cualquier error o THROW.
     const request = this.requireQuery().request()
     let index = 0
     const body = statements
       .map((st, i) => {
         for (const value of st.params) request.input(`p${index++}`, value)
-        const label = (st.label ?? `nº ${i + 1}`).replace(/'/g, "''")
-        return `${st.sql};\nIF @@ROWCOUNT <> 1 THROW 50001, N'No se guardó nada: la fila con ${label} ya no existe, su clave ha cambiado o afecta a varias filas. Recarga la tabla.', 1;`
+        const label = (st.label ?? `el cambio nº ${i + 1}`).replace(/'/g, "''")
+        return `${st.sql};\nIF @@ROWCOUNT <> 1 THROW 50001, N'No se guardó nada: ${label} ya no existe, su clave ha cambiado o afecta a varias filas. Recarga la tabla.', 1;`
       })
       .join('\n')
     await request.query(`SET XACT_ABORT ON;\nBEGIN TRANSACTION;\n${body}\nCOMMIT TRANSACTION;`)

@@ -16,7 +16,7 @@ import {
   saveConnectionSchema,
   tableDataSchema,
   tableRefSchema,
-  updateRowsSchema
+  rowChangesSchema
 } from './validation'
 
 export interface IpcDeps {
@@ -76,7 +76,7 @@ export function registerIpc({ store, vault, sessions, window }: IpcDeps): void {
     fetchTableData: (id, input) => sessions.fetchTableData(idSchema.parse(id), tableDataSchema.parse(input)),
     countTableRows: (id, input) => sessions.countTableRows(idSchema.parse(id), countSchema.parse(input)),
     tableStructure: (id, ref) => sessions.tableStructure(idSchema.parse(id), tableRefSchema.parse(ref)),
-    updateRows: (id, input) => sessions.updateRows(idSchema.parse(id), updateRowsSchema.parse(input)),
+    saveRowChanges: (id, input) => sessions.saveRowChanges(idSchema.parse(id), rowChangesSchema.parse(input)),
     runQuery: (id, input) => sessions.run(idSchema.parse(id), runQuerySchema.parse(input)),
     cancelQuery: (id) => sessions.cancel(idSchema.parse(id)),
     exportFile: async (raw) => {

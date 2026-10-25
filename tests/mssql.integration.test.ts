@@ -115,13 +115,13 @@ describe.skipIf(!enabled)('SQL Server (integración)', () => {
       INSERT INTO tempdb.dbo.gestor_bbdd_edicion VALUES (1, N'uno', '2026-01-02T03:04:05'), (2, N'dos', NULL)`)
     try {
       await expect(
-        sessions.updateRows(sessionId, {
+        sessions.saveRowChanges(sessionId, {
           ...ref,
           updates: [{ key: [{ column: 'id', value: 1 }], set: [{ column: 'nombre', value: 'Uno ✓' }, { column: 'alta', value: '2026-12-01 08:30:00' }] }]
         })
-      ).resolves.toEqual({ applied: 1 })
+      ).resolves.toEqual({ updated: 1, inserted: 0, deleted: 0 })
       await expect(
-        sessions.updateRows(sessionId, {
+        sessions.saveRowChanges(sessionId, {
           ...ref,
           updates: [
             { key: [{ column: 'id', value: 2 }], set: [{ column: 'nombre', value: 'no debe quedar' }] },
@@ -134,6 +134,19 @@ describe.skipIf(!enabled)('SQL Server (integración)', () => {
       expect(page.rows).toEqual([
         [1, 'Uno ✓', '2026-12-01 08:30:00'],
         [2, 'dos', null]
+      ])
+      await expect(
+        sessions.saveRowChanges(sessionId, {
+          ...ref,
+          deletes: [[{ column: 'id', value: 2 }]],
+          inserts: [[{ column: 'id', value: 2 }, { column: 'nombre', value: 'dos (nueva)' }], [{ column: 'id', value: 3 }]]
+        })
+      ).resolves.toEqual({ updated: 0, inserted: 2, deleted: 1 })
+      const after = await sessions.fetchTableData(sessionId, { ...ref, offset: 0, limit: 10, sort: [] })
+      expect(after.rows.map((r) => r.slice(0, 2))).toEqual([
+        [1, 'Uno ✓'],
+        [2, 'dos (nueva)'],
+        [3, null]
       ])
     } finally {
       await run('DROP TABLE IF EXISTS tempdb.dbo.gestor_bbdd_edicion')

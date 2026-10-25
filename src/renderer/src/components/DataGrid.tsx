@@ -17,8 +17,16 @@ function initialWidths(columns: ResultColumn[], rows: CellValue[][]): number[] {
   })
 }
 
-/** Cambios sin guardar: fila → (columna → valor nuevo). */
+/** Cambios sin guardar: fila → (columna → valor nuevo). Incluye las filas nuevas. */
 export type PendingEdits = Map<number, Map<number, CellValue>>
+
+/** Petición del padre para situar el cursor (y opcionalmente editar); `nonce` distingue peticiones. */
+export interface FocusRequest {
+  row: number
+  col: number
+  edit: boolean
+  nonce: number
+}
 
 interface Props {
   columns: ResultColumn[]
@@ -36,6 +44,18 @@ interface Props {
   onEdit?: (row: number, col: number, value: CellValue) => void
   /** Alt+Enter: guardar los cambios pendientes. */
   onSubmit?: () => void
+  /** Filas nuevas sin guardar, pintadas a continuación de `rows`. */
+  newRows?: number
+  /** Filas marcadas para borrar. */
+  deleted?: Set<number>
+  /** Texto de las celdas aún sin valor en filas nuevas, por columna: (auto), NULL… */
+  placeholders?: string[]
+  /** Alt+Insert. */
+  onAddRow?: () => void
+  /** Ctrl+Supr sobre las filas seleccionadas. */
+  onDeleteRows?: (rows: number[]) => void
+  onSelectionChange?: (rows: number[]) => void
+  focusRequest?: FocusRequest | null
 }
 
 interface Editing {
@@ -46,8 +66,11 @@ interface Editing {
 
 export function DataGrid(props: Props) {
   const { columns, rows, rowOffset = 0, sort = [], onSort, primaryKey, foreignKeys, onNavigate, pending, onEdit, onSubmit } = props
+  const { newRows = 0, deleted, placeholders, onAddRow, onDeleteRows, onSelectionChange, focusRequest } = props
   const scroller = useRef<HTMLDivElement>(null)
   const [selected, setSelected] = useState<{ row: number; col: number } | null>(null)
+  // Ancla de la selección de varias filas (Mayús+clic / Mayús+flechas).
+  const [anchor, setAnchor] = useState<number | null>(null)
   const [editing, setEditingState] = useState<Editing | null>(null)
   // Copia síncrona: el blur que provocan Enter/Esc llega antes de que React actualice el estado.
   const editingRef = useRef<Editing | null>(null)
@@ -56,7 +79,8 @@ export function DataGrid(props: Props) {
     setEditingState(value)
   }
   const [widths, setWidths] = useState(() => initialWidths(columns, rows))
-  const numWidth = Math.max(44, String(rowOffset + rows.length).length * 8 + 20)
+  const total = rows.length + newRows
+  const numWidth = Math.max(44, String(rowOffset + total).length * 8 + 20)
   const editable = Boolean(onEdit)
 
   // Mismas columnas (otra página u otro orden): se conservan los anchos que el usuario ajustó.
@@ -64,19 +88,33 @@ export function DataGrid(props: Props) {
   useEffect(() => setWidths(initialWidths(columns, rows)), [columnsKey])
   useEffect(() => {
     setSelected(null)
+    setAnchor(null)
     setEditing(null)
   }, [rows])
 
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: total,
     getScrollElement: () => scroller.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 20
   })
 
+  const isNew = (row: number) => row >= rows.length
+  const isDeleted = (row: number) => deleted?.has(row) ?? false
   const isPending = (row: number, col: number) => pending?.get(row)?.has(col) ?? false
-  const valueAt = (row: number, col: number): CellValue =>
-    isPending(row, col) ? (pending!.get(row)!.get(col) ?? null) : (rows[row]?.[col] ?? null)
+  /** `undefined` = celda de una fila nueva a la que aún no se ha dado valor. */
+  const valueAt = (row: number, col: number): CellValue | undefined =>
+    isPending(row, col) ? (pending!.get(row)!.get(col) ?? null) : isNew(row) ? undefined : (rows[row]?.[col] ?? null)
+
+  const selectedRows = useMemo(() => {
+    if (!selected) return []
+    const from = Math.min(anchor ?? selected.row, selected.row)
+    const to = Math.max(anchor ?? selected.row, selected.row)
+    return Array.from({ length: to - from + 1 }, (_, i) => from + i)
+  }, [selected, anchor])
+  const inRange = (row: number) => selectedRows.length > 1 && row >= selectedRows[0]! && row <= selectedRows.at(-1)!
+
+  useEffect(() => onSelectionChange?.(selectedRows), [selectedRows])
 
   const selectedValue = selected ? valueAt(selected.row, selected.col) : undefined
   const sortOf = (name: string) => sort.find((s) => s.column === name)?.direction
@@ -98,9 +136,11 @@ export function DataGrid(props: Props) {
     if (fk && row && onNavigate && row[col] !== null) onNavigate(fk, row)
   }
 
-  const moveTo = (row: number, col: number) => {
-    const r = Math.max(0, Math.min(rows.length - 1, row))
+  const moveTo = (row: number, col: number, extend = false) => {
+    const r = Math.max(0, Math.min(total - 1, row))
     const c = Math.max(0, Math.min(columns.length - 1, col))
+    if (extend) setAnchor((a) => a ?? selected?.row ?? r)
+    else setAnchor(null)
     setSelected({ row: r, col: c })
     virtualizer.scrollToIndex(r, { align: 'auto' })
     // El scroll horizontal se ajusta cuando la celda ya está pintada.
@@ -110,11 +150,20 @@ export function DataGrid(props: Props) {
   }
 
   const startEdit = (row: number, col: number, initial?: string) => {
-    if (!editable) return
+    if (!editable || isDeleted(row)) return
     const current = valueAt(row, col)
     setSelected({ row, col })
-    setEditing({ row, col, text: initial ?? (current === null ? '' : String(current)) })
+    setAnchor(null)
+    setEditing({ row, col, text: initial ?? (current === null || current === undefined ? '' : String(current)) })
   }
+
+  // El padre pide situarse en una celda (p. ej. la primera de una fila recién añadida).
+  useEffect(() => {
+    if (!focusRequest) return
+    moveTo(focusRequest.row, focusRequest.col)
+    if (focusRequest.edit) requestAnimationFrame(() => startEdit(focusRequest.row, focusRequest.col))
+    else focusGrid()
+  }, [focusRequest?.nonce])
 
   /** Pasa lo escrito a cambios pendientes. Devuelve false si no había edición en curso. */
   const commitEdit = (): boolean => {
@@ -126,7 +175,13 @@ export function DataGrid(props: Props) {
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (editing || rows.length === 0 || columns.length === 0) return
+    if (editing || columns.length === 0) return
+    if (e.altKey && e.key === 'Insert' && onAddRow) {
+      e.preventDefault()
+      onAddRow()
+      return
+    }
+    if (total === 0) return
     const cur = selected ?? { row: 0, col: 0 }
     const pageRows = Math.max(1, Math.floor((scroller.current?.clientHeight ?? 400) / ROW_HEIGHT) - 2)
     if (e.altKey && e.key === 'Enter') {
@@ -134,15 +189,20 @@ export function DataGrid(props: Props) {
       onSubmit?.()
       return
     }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Delete' && onDeleteRows && selected) {
+      e.preventDefault()
+      onDeleteRows(selectedRows)
+      return
+    }
     const keys: Record<string, () => void> = {
-      ArrowDown: () => moveTo(cur.row + 1, cur.col),
-      ArrowUp: () => moveTo(cur.row - 1, cur.col),
+      ArrowDown: () => moveTo(cur.row + 1, cur.col, e.shiftKey),
+      ArrowUp: () => moveTo(cur.row - 1, cur.col, e.shiftKey),
       ArrowRight: () => moveTo(cur.row, cur.col + 1),
       ArrowLeft: () => moveTo(cur.row, cur.col - 1),
-      PageDown: () => moveTo(cur.row + pageRows, cur.col),
-      PageUp: () => moveTo(cur.row - pageRows, cur.col),
+      PageDown: () => moveTo(cur.row + pageRows, cur.col, e.shiftKey),
+      PageUp: () => moveTo(cur.row - pageRows, cur.col, e.shiftKey),
       Home: () => (e.ctrlKey ? moveTo(0, 0) : moveTo(cur.row, 0)),
-      End: () => (e.ctrlKey ? moveTo(rows.length - 1, columns.length - 1) : moveTo(cur.row, columns.length - 1)),
+      End: () => (e.ctrlKey ? moveTo(total - 1, columns.length - 1) : moveTo(cur.row, columns.length - 1)),
       Tab: () => moveTo(cur.row, cur.col + (e.shiftKey ? -1 : 1))
     }
     if (editable && selected && (e.key === 'Enter' || e.key === 'F2') && !e.ctrlKey && !e.metaKey) {
@@ -213,9 +273,12 @@ export function DataGrid(props: Props) {
     window.addEventListener('mouseup', up)
   }
 
+  const viewerText = (col: number, value: CellValue | undefined) =>
+    value === undefined ? `sin valor: ${placeholders?.[col] ?? 'por defecto'}` : display(value)
+
   return (
     <>
-      <div className="grid" ref={scroller} tabIndex={0} onKeyDown={onKeyDown} role="grid" aria-rowcount={rows.length}>
+      <div className="grid" ref={scroller} tabIndex={0} onKeyDown={onKeyDown} role="grid" aria-rowcount={total}>
         <div className="grid-header" role="row">
           <div className="grid-cell rownum" style={{ width: numWidth }}>
             #
@@ -247,24 +310,29 @@ export function DataGrid(props: Props) {
         </div>
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((item) => {
-            const rowEdited = (pending?.get(item.index)?.size ?? 0) > 0
+            const rowIsNew = isNew(item.index)
+            const rowIsDeleted = isDeleted(item.index)
+            const rowEdited = !rowIsNew && (pending?.get(item.index)?.size ?? 0) > 0
+            const rowState = rowIsDeleted ? 'row-deleted' : rowIsNew ? 'row-new' : rowEdited ? 'row-modified' : ''
             return (
               <div
                 key={item.key}
                 role="row"
-                className={`grid-row ${selected?.row === item.index ? 'current' : ''}`}
+                aria-label={rowIsDeleted ? 'Fila marcada para borrar' : rowIsNew ? 'Fila nueva' : undefined}
+                className={`grid-row ${selected?.row === item.index ? 'current' : ''} ${inRange(item.index) ? 'in-range' : ''} ${rowIsDeleted ? 'deleted' : ''}`}
                 style={{ position: 'absolute', top: 0, left: 0, transform: `translateY(${item.start}px)` }}
               >
-                <div className={`grid-cell rownum ${rowEdited ? 'row-modified' : ''}`} style={{ width: numWidth }}>
-                  {rowOffset + item.index + 1}
+                <div className={`grid-cell rownum ${rowState}`} style={{ width: numWidth }}>
+                  {rowIsNew ? '+' : rowOffset + item.index + 1}
                 </div>
                 {columns.map((_, col) => {
                   const value = valueAt(item.index, col)
                   const modified = isPending(item.index, col)
                   const isSelected = selected?.row === item.index && selected.col === col
                   const isEditing = editing?.row === item.index && editing.col === col
-                  const linkable = !modified && value !== null && fkIndexes.has(col)
-                  const cls = value === null ? 'null' : typeof value === 'number' ? 'num' : ''
+                  const linkable = !modified && !rowIsNew && !rowIsDeleted && value !== null && fkIndexes.has(col)
+                  const cls =
+                    value === undefined ? 'placeholder' : value === null ? 'null' : typeof value === 'number' ? 'num' : ''
                   return (
                     <div
                       key={col}
@@ -274,6 +342,8 @@ export function DataGrid(props: Props) {
                       style={{ width: widths[col] }}
                       onClick={(e) => {
                         if (editing && !isEditing) commitEdit()
+                        if (e.shiftKey && selected) setAnchor((a) => a ?? selected.row)
+                        else setAnchor(null)
                         setSelected({ row: item.index, col })
                         if (linkable && (e.ctrlKey || e.metaKey)) navigate(item.index, col)
                       }}
@@ -292,7 +362,7 @@ export function DataGrid(props: Props) {
                           onBlur={() => commitEdit()}
                         />
                       ) : (
-                        <span className="cell-text">{display(value)}</span>
+                        <span className="cell-text">{value === undefined ? (placeholders?.[col] ?? '') : display(value)}</span>
                       )}
                       {linkable && !isEditing && (
                         <button
@@ -313,14 +383,16 @@ export function DataGrid(props: Props) {
             )
           })}
         </div>
-        {rows.length === 0 && <div className="grid-empty">Sin filas</div>}
+        {total === 0 && <div className="grid-empty">Sin filas</div>}
       </div>
-      {selected && selectedValue !== undefined && (
+      {selected && (
         <div className="value-viewer">
           <span className="value-text">
-            <strong>{columns[selected.col]?.name}</strong> (fila {rowOffset + selected.row + 1}): {display(selectedValue)}
+            <strong>{columns[selected.col]?.name}</strong> ({isNew(selected.row) ? 'fila nueva' : `fila ${rowOffset + selected.row + 1}`}
+            {selectedRows.length > 1 ? ` · ${selectedRows.length} filas seleccionadas` : ''}):{' '}
+            {viewerText(selected.col, selectedValue)}
           </span>
-          {editable && (
+          {editable && !isDeleted(selected.row) && (
             <span className="value-actions">
               <button className="compact" title="Editar (Enter, F2 o doble clic)" onClick={() => startEdit(selected.row, selected.col)}>
                 Editar

@@ -39,10 +39,10 @@ export interface DbDriver {
   /** Cambia la base de datos activa de la conexión de consultas. */
   useDatabase(database: string): Promise<void>
   /**
-   * Ejecuta los UPDATE en una transacción. Cada uno debe afectar exactamente a una fila;
-   * si alguno no, se deshace todo y se lanza un error.
+   * Ejecuta los INSERT/UPDATE/DELETE en una transacción. Cada uno debe afectar exactamente a
+   * una fila; si alguno no, se deshace todo y se lanza un error.
    */
-  executeUpdates(statements: ParamStatement[]): Promise<void>
+  executeChanges(statements: ParamStatement[]): Promise<void>
   /** Ejecuta una sentencia; puede devolver varios resultados (procedimientos, lotes T-SQL). */
   execute(statement: string, options: ExecuteOptions): Promise<QueryResult[]>
   cancel(): Promise<void>

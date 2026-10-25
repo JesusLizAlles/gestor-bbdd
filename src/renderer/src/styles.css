@@ -1001,3 +1001,27 @@ button.compact {
   flex: none;
   font-family: system-ui, sans-serif;
 }
+
+/* Altas y bajas en la rejilla */
+.grid-cell.row-new {
+  box-shadow: inset 3px 0 0 var(--ok);
+  color: var(--ok);
+  font-weight: 600;
+}
+.grid-cell.row-deleted {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.grid-row.deleted {
+  background: rgba(229, 83, 75, 0.1) !important;
+}
+.grid-row.deleted .grid-cell:not(.rownum) .cell-text {
+  text-decoration: line-through;
+  color: #b07a76;
+}
+.grid-row.in-range {
+  background: #243049 !important;
+}
+.grid-cell.placeholder .cell-text {
+  color: #6f737a;
+  font-style: italic;
+}

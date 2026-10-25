@@ -83,9 +83,13 @@ export const tableDataSchema = z.object({
 const cellValue = z.union([z.string().max(16_000_000), z.number(), z.boolean(), z.null()])
 const cellChange = z.object({ column: identifierSchema, value: cellValue })
 
-export const updateRowsSchema = z.object({
+const rowKey = z.array(cellChange).min(1).max(32)
+
+export const rowChangesSchema = z.object({
   ...tableRef,
-  updates: z.array(z.object({ key: z.array(cellChange).min(1).max(32), set: z.array(cellChange).min(1).max(1000) })).max(10_000),
+  updates: z.array(z.object({ key: rowKey, set: z.array(cellChange).min(1).max(1000) })).max(10_000).optional(),
+  inserts: z.array(z.array(cellChange).max(1000)).max(10_000).optional(),
+  deletes: z.array(rowKey).max(10_000).optional(),
   confirmedWrite: z.boolean().optional()
 })
 

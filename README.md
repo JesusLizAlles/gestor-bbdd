@@ -23,7 +23,10 @@ se genera por detrás.
 - **Edición en la rejilla**, al estilo JetBrains:
   - Para editar: <kbd>Enter</kbd>, <kbd>F2</kbd>, doble clic o empezar a escribir sobre la celda. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserta un salto de línea; <kbd>Esc</kbd> cancela.
   - Los cambios quedan pendientes y resaltados. **<kbd>Alt</kbd>+<kbd>Enter</kbd>** los guarda; «Descartar» los deshace. «NULL» pone la celda a NULL.
-  - Se guarda con `UPDATE` con parámetros, en una sola transacción, localizando cada fila por su clave primaria.
+  - **Filas nuevas**: <kbd>Alt</kbd>+<kbd>Insert</kbd> o «＋ Fila». La fila aparece al final y empieza a editarse. Las celdas vacías muestran qué recibirán: `(auto)`, `(valor por defecto)`, `NULL` u `(obligatorio)`.
+  - **Borrar filas**: <kbd>Ctrl</kbd>+<kbd>Supr</kbd> o «－ Fila» sobre la selección (<kbd>Shift</kbd>+clic o <kbd>Shift</kbd>+flechas para varias). Quedan tachadas hasta guardar; repetir el atajo las restaura. Una fila nueva sin guardar simplemente se quita.
+  - Todo se guarda con sentencias con parámetros en una sola transacción: primero los borrados, luego los cambios y por último las altas. Así se puede borrar una fila y volver a crearla con la misma clave.
+  - Las filas se localizan por su clave primaria.
   - Si alguna fila ya no existe o cambió su clave, no se guarda nada y se indica cuál.
   - En producción se pide confirmación mostrando las sentencias.
   - No se puede editar en vistas, tablas sin clave primaria ni conexiones de solo lectura.
@@ -141,11 +144,13 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
 - **SSH:**
   - Sin saltos encadenados (*jump hosts*) y sin leer `~/.ssh/config`.
   - La primera conexión acepta la huella automáticamente. Se muestra en «Probar conexión» y en la barra de estado.
-- **Funciones aún no disponibles:** añadir o borrar filas desde la rejilla, importar CSV, historial de consultas.
+- **Funciones aún no disponibles:** importar CSV, historial de consultas.
 - **Edición:**
   - Los valores se envían como texto y los convierte el servidor (`'25.5'` → DECIMAL).
   - No se pueden editar binarios: se muestran abreviados en `0x…`.
   - En DataGrip, guardar es <kbd>Ctrl</kbd>+<kbd>Enter</kbd>; aquí es <kbd>Alt</kbd>+<kbd>Enter</kbd>.
+  - Las filas nuevas van a la página actual hasta guardar. Después, la tabla se recarga y la fila aparece donde le corresponda por orden (puede ser otra página).
+  - En tablas sin clave primaria no se puede añadir, modificar ni borrar desde la rejilla; para eso está la consola.
 - **Visor:**
   - Ordena por una sola columna a la vez.
   - El filtro admite subconsultas de lectura.
