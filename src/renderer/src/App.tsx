@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConnectionSummary, ObjectKind, SecretStorageStatus, SessionInfo, TableInfo, TableRef } from '@shared/types'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ConnectionDialog } from './components/ConnectionDialog'
@@ -32,30 +32,55 @@ export function App() {
   const [filterRequests, setFilterRequests] = useState<Record<string, { where: string; nonce: number }>>({})
   const [editing, setEditing] = useState<ConnectionSummary | 'new' | null>(null)
   const [deleting, setDeleting] = useState<ConnectionSummary | null>(null)
+  /** Conexiones abiertas con el árbol plegado (al conectar se despliega). */
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const activeSession = activeTab ? sessions.find((s) => s.info.sessionId === activeTab.sessionId) : undefined
 
   const reloadConnections = useCallback(async () => {
-    setConnections(await window.api.listConnections())
+    const list = await window.api.listConnections()
+    setConnections(list)
+    return list
   }, [])
 
-  useEffect(() => {
-    void reloadConnections()
-    void window.api.secretStorageStatus().then(setSecretStatus)
-  }, [reloadConnections])
-
-  const connect = async (connection: ConnectionSummary) => {
-    if (sessions.some((s) => s.connection.id === connection.id)) return
+  /** `expand`: desplegar el árbol al conectar (al pulsarla) o dejarlo plegado (al arrancar). */
+  const connect = async (connection: ConnectionSummary, expand = true) => {
+    if (sessions.some((s) => s.connection.id === connection.id) || connecting[connection.id] === null) return
     setConnecting((s) => ({ ...s, [connection.id]: null }))
     try {
       const info = await window.api.openSession(connection.id)
       setSessions((list) => [...list, { info, connection }])
+      setCollapsed((set) => {
+        const next = new Set(set)
+        if (expand) next.delete(connection.id)
+        else next.add(connection.id)
+        return next
+      })
       setConnecting(({ [connection.id]: _done, ...rest }) => rest)
     } catch (err) {
       setConnecting((s) => ({ ...s, [connection.id]: (err as Error).message }))
     }
   }
+
+  // Al arrancar se conecta todo, en paralelo y con los árboles plegados: así cada conexión ya
+  // muestra su desplegable. Las que fallen quedan con el aviso y se reintentan con un clic.
+  const started = useRef(false)
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    void window.api.secretStorageStatus().then(setSecretStatus)
+    void reloadConnections().then((list) => {
+      for (const c of list) void connect(c, false)
+    })
+  })
+
+  const toggleConnection = (id: string) =>
+    setCollapsed((set) => {
+      const next = new Set(set)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
 
   const closeTab = (id: string) => {
     const index = tabs.findIndex((t) => t.id === id)
@@ -136,57 +161,76 @@ export function App() {
         <div className="connections">
           {connections.length === 0 && <div className="empty-note">Aún no hay conexiones. Pulsa ＋ para crear una.</div>}
           {connections.map((c) => {
-            const isOpen = sessions.some((s) => s.connection.id === c.id)
+            const session = sessions.find((s) => s.connection.id === c.id)
             const state = connecting[c.id]
+            const failed = typeof state === 'string'
+            const expanded = session !== undefined && !collapsed.has(c.id)
+            const server = session ? `${session.info.server.product} ${session.info.server.version}` : null
+            const title = server
+              ? `Conectada · ${server}`
+              : state === null
+                ? 'Conectando…'
+                : failed
+                  ? `No se pudo conectar: ${state}\nClic para reintentar`
+                  : 'Clic para conectar'
             return (
               <div key={c.id}>
                 <div
-                  className={`connection ${isOpen ? 'open' : ''}`}
-                  onDoubleClick={() => void connect(c)}
-                  title={isOpen ? 'Conectada' : 'Doble clic para conectar'}
+                  className={`connection ${session ? 'open' : ''}`}
+                  onClick={() => (session ? toggleConnection(c.id) : void connect(c))}
+                  title={title}
                 >
+                  <span className="twisty">
+                    {state === null ? <span className="spinner" /> : failed ? <span className="conn-warning">⚠</span> : expanded ? '▾' : '▸'}
+                  </span>
                   <span className={`env-dot env-${c.environment}`} />
                   <span className="name">{c.name}</span>
                   {c.ssh.enabled && <span className="badge">SSH</span>}
                   {c.readOnly && <span className="badge ro">RO</span>}
                   <span className="badge">{c.engine === 'mysql' ? 'MySQL' : 'MSSQL'}</span>
-                  <span className="actions">
-                    {!isOpen && (
-                      <button className="icon" title="Conectar" onClick={() => void connect(c)}>
-                        {state === null ? '…' : '▶'}
+                  <span className="actions" onClick={(e) => e.stopPropagation()}>
+                    {session ? (
+                      <>
+                        <button className="icon" title="Nueva consola SQL" onClick={() => openConsole(session.info.sessionId, null)}>
+                          ⌨
+                        </button>
+                        <button className="icon" title="Desconectar" onClick={() => void disconnect(session.info.sessionId)}>
+                          ⏏
+                        </button>
+                      </>
+                    ) : (
+                      <button className="icon" title="Conectar" disabled={state === null} onClick={() => void connect(c)}>
+                        ▶
                       </button>
                     )}
                     <button className="icon" title="Editar" onClick={() => setEditing(c)}>
                       ✎
                     </button>
-                    <button className="icon" title="Borrar" onClick={() => setDeleting(c)}>
-                      🗑
-                    </button>
+                    {!session && (
+                      <button className="icon" title="Borrar" onClick={() => setDeleting(c)}>
+                        🗑
+                      </button>
+                    )}
                   </span>
                 </div>
-                {typeof state === 'string' && (
-                  <div className="tree-error" style={{ paddingLeft: 26 }}>
-                    {state}
+                {/* Plegada se oculta sin desmontar: conserva lo cargado y lo desplegado. */}
+                {session && (
+                  <div hidden={!expanded}>
+                    <Explorer
+                      session={session.info}
+                      activeTable={
+                        activeTab?.type === 'table' && activeTab.sessionId === session.info.sessionId ? activeTab.ref : null
+                      }
+                      onOpenTable={(database, t: TableInfo) =>
+                        openTable(session.info.sessionId, { database, schema: t.schema, table: t.name }, t.kind)
+                      }
+                      onOpenConsole={(database) => openConsole(session.info.sessionId, database)}
+                    />
                   </div>
                 )}
               </div>
             )
           })}
-        </div>
-        <div className="section-title">Explorador</div>
-        <div className="explorer">
-          {sessions.length === 0 && <div className="empty-note">Conecta a una base de datos para ver sus objetos.</div>}
-          {sessions.map((s) => (
-            <Explorer
-              key={s.info.sessionId}
-              session={s.info}
-              connectionName={s.connection.name}
-              activeTable={activeTab?.type === 'table' && activeTab.sessionId === s.info.sessionId ? activeTab.ref : null}
-              onOpenTable={(database, t: TableInfo) => openTable(s.info.sessionId, { database, schema: t.schema, table: t.name }, t.kind)}
-              onOpenConsole={(database) => openConsole(s.info.sessionId, database)}
-              onClose={() => void disconnect(s.info.sessionId)}
-            />
-          ))}
         </div>
       </aside>
 
@@ -253,7 +297,7 @@ export function App() {
             {sessions.length === 0 ? (
               <>
                 <div>MySQL / MariaDB y SQL Server · conexión directa, TLS o túnel SSH</div>
-                <div className="note">Haz doble clic en una conexión para conectar.</div>
+                <div className="note">Pulsa una conexión para ver sus bases de datos.</div>
                 <button className="primary" onClick={() => setEditing('new')}>
                   Nueva conexión
                 </button>

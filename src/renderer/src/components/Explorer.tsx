@@ -3,13 +3,11 @@ import type { ColumnInfo, SessionInfo, TableInfo } from '@shared/types'
 
 interface Props {
   session: SessionInfo
-  connectionName: string
   /** Tabla de la pestaña activa, para resaltarla en el árbol. */
   activeTable: { database: string; schema: string | null; table: string } | null
   onOpenTable: (database: string, table: TableInfo) => void
-  /** Nueva consola SQL; con base de datos si se abre desde una. */
-  onOpenConsole: (database: string | null) => void
-  onClose: () => void
+  /** Nueva consola SQL en esa base de datos. */
+  onOpenConsole: (database: string) => void
 }
 
 type Loadable<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string }
@@ -49,12 +47,15 @@ function Row(props: {
   )
 }
 
-/** Árbol de una sesión: bases de datos → tablas/vistas → columnas, cargado bajo demanda. */
-export function Explorer({ session, connectionName, activeTable, onOpenTable, onOpenConsole, onClose }: Props) {
+/**
+ * Árbol de una sesión, colgado de su conexión en la lista: bases de datos → tablas/vistas →
+ * columnas, cargado bajo demanda.
+ */
+export function Explorer({ session, activeTable, onOpenTable, onOpenConsole }: Props) {
   const [databases, setDatabases] = useState<Loadable<string[]>>({ state: 'loading' })
   const [tables, setTables] = useState<Record<string, Loadable<TableInfo[]>>>({})
   const [columns, setColumns] = useState<Record<string, Loadable<ColumnInfo[]>>>({})
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['root']))
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [filter, setFilter] = useState('')
 
   const loadDatabases = useCallback(async () => {
@@ -107,12 +108,11 @@ export function Explorer({ session, connectionName, activeTable, onOpenTable, on
   const refresh = () => {
     setTables({})
     setColumns({})
-    setExpanded(new Set(['root']))
+    setExpanded(new Set())
     void loadDatabases()
   }
 
   const needle = filter.trim().toLowerCase()
-  const rootOpen = expanded.has('root')
 
   const renderObject = (db: string, t: TableInfo, depth: number) => {
     const key = tableKey(db, t)
@@ -177,72 +177,45 @@ export function Explorer({ session, connectionName, activeTable, onOpenTable, on
 
   return (
     <div>
-      <Row
-        depth={0}
-        kind="folder"
-        expanded={rootOpen}
-        label={connectionName}
-        meta={`${session.server.product} ${session.server.version}`}
-        onClick={() => toggle('root')}
-        actions={
-          <button
-            className="icon"
-            title="Nueva consola SQL"
-            onClick={(e) => {
-              e.stopPropagation()
-              onOpenConsole(null)
-            }}
-          >
-            ⌨
-          </button>
-        }
-      />
-      {rootOpen && (
-        <>
-          <div className="explorer-filter" style={{ paddingLeft: 20, display: 'flex', gap: 4 }}>
-            <input placeholder="Filtrar tablas…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <button className="icon" title="Recargar" onClick={refresh}>
-              ↻
-            </button>
-            <button className="icon" title="Desconectar" onClick={onClose}>
-              ⏏
-            </button>
-          </div>
-          {databases.state === 'loading' && <Row depth={1} kind="folder" label="Cargando…" />}
-          {databases.state === 'error' && <div className="tree-error">{databases.message}</div>}
-          {databases.state === 'ready' &&
-            databases.value.map((db) => {
-              const key = `db:${db}`
-              const open = expanded.has(key)
-              const count = tables[db]?.state === 'ready' ? String((tables[db] as { value: TableInfo[] }).value.length) : undefined
-              return (
-                <div key={db}>
-                  <Row
-                    depth={1}
-                    kind="db"
-                    label={db}
-                    meta={count}
-                    expanded={open}
-                    onClick={() => toggle(key, () => tables[db]?.state !== 'ready' && void loadTables(db))}
-                    actions={
-                      <button
-                        className="icon"
-                        title={`Nueva consola SQL en ${db}`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onOpenConsole(db)
-                        }}
-                      >
-                        ⌨
-                      </button>
-                    }
-                  />
-                  {open && renderTables(db)}
-                </div>
-              )
-            })}
-        </>
-      )}
+      <div className="explorer-filter">
+        <input placeholder="Filtrar tablas…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button className="icon" title="Recargar" onClick={refresh}>
+          ↻
+        </button>
+      </div>
+      {databases.state === 'loading' && <Row depth={1} kind="folder" label="Cargando…" />}
+      {databases.state === 'error' && <div className="tree-error">{databases.message}</div>}
+      {databases.state === 'ready' &&
+        databases.value.map((db) => {
+          const key = `db:${db}`
+          const open = expanded.has(key)
+          const count = tables[db]?.state === 'ready' ? String((tables[db] as { value: TableInfo[] }).value.length) : undefined
+          return (
+            <div key={db}>
+              <Row
+                depth={1}
+                kind="db"
+                label={db}
+                meta={count}
+                expanded={open}
+                onClick={() => toggle(key, () => tables[db]?.state !== 'ready' && void loadTables(db))}
+                actions={
+                  <button
+                    className="icon"
+                    title={`Nueva consola SQL en ${db}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenConsole(db)
+                    }}
+                  >
+                    ⌨
+                  </button>
+                }
+              />
+              {open && renderTables(db)}
+            </div>
+          )
+        })}
     </div>
   )
 }

@@ -111,7 +111,7 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
   })
 
   it('abre una tabla con doble clic y la pantalla principal son sus datos, sin SQL a la vista', async () => {
-    await page.locator('.connection', { hasText: 'MariaDB pruebas' }).dblclick()
+    await page.locator('.connection', { hasText: 'MariaDB pruebas' }).click()
     await page.getByText('Despliega una base de datos').waitFor()
     await page.locator('.tree-row', { hasText: DB }).click()
     await page.locator('.tree-row', { hasText: 'reservas' }).dblclick()

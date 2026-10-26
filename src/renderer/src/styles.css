@@ -148,22 +148,51 @@ input[type='checkbox'] {
   color: var(--text-dim);
 }
 
-/* Lista de conexiones */
+/* Conexiones, cada una con su árbol debajo cuando está abierta */
 .connections {
-  border-bottom: 1px solid var(--border);
-  max-height: 40%;
+  flex: 1;
   overflow: auto;
+  min-height: 0;
   padding-bottom: 6px;
 }
+/* Altura fija y acciones superpuestas: al pasar el ratón la fila no cambia de tamaño. */
 .connection {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 6px;
   cursor: pointer;
 }
 .connection:hover {
   background: var(--bg-hover);
+}
+.connection .twisty {
+  width: 14px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.connection .conn-warning {
+  color: var(--warn);
+  font-size: 12px;
+}
+.spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--text-dim);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .connection .name {
   flex: 1;
@@ -172,10 +201,26 @@ input[type='checkbox'] {
   white-space: nowrap;
 }
 .connection .actions {
-  display: none;
+  position: absolute;
+  top: 0;
+  right: 6px;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding-left: 6px;
+  background: var(--bg-hover);
+  visibility: hidden;
 }
 .connection:hover .actions {
-  display: flex;
+  visibility: visible;
+}
+/* Las acciones ocupan el sitio de las etiquetas: mejor ocultarlas que dejarlas cortadas. */
+.connection:hover .badge {
+  visibility: hidden;
+}
+.connection .actions .icon {
+  padding: 0 4px;
+  line-height: 18px;
 }
 .env-dot {
   width: 8px;
@@ -214,13 +259,14 @@ input[type='checkbox'] {
 }
 
 /* Árbol del explorador */
-.explorer {
-  flex: 1;
-  overflow: auto;
-  min-height: 0;
-}
 .explorer-filter {
-  padding: 0 10px 6px;
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px 4px 20px;
+}
+.explorer-filter input {
+  flex: 1;
+  min-width: 0;
 }
 .tree-row {
   display: flex;
