@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { guessTableName, qualifiedName, quoteIdent, toCsv, toJson, toSqlInserts } from '@shared/format'
+import { guessTableName, parseTsv, qualifiedName, quoteIdent, toCsv, toJson, toSqlInserts, toTsv } from '@shared/format'
 import type { QueryResult } from '@shared/types'
 
 const result: QueryResult = {
@@ -72,5 +72,32 @@ describe('toSqlInserts', () => {
     expect(guessTableName('SELECT * FROM SAGE.dbo.Clientes')).toBe('SAGE.dbo.Clientes')
     expect(guessTableName('SELECT * FROM [SAGE] . [dbo].[Clientes]')).toBe('[SAGE].[dbo].[Clientes]')
     expect(guessTableName('SELECT 1')).toBeNull()
+  })
+})
+
+describe('toTsv / parseTsv', () => {
+  it('ida y vuelta conserva NULL, tabuladores, saltos y comillas', () => {
+    const cells = [
+      [1, 'Ana', null],
+      [2, 'a\tb "c"', 'línea1\nlínea2']
+    ]
+    const text = toTsv(cells)
+    expect(text).toBe('1\tAna\tNULL\n2\t"a\tb ""c"""\t"línea1\nlínea2"')
+    expect(parseTsv(text)).toEqual([
+      ['1', 'Ana', null],
+      ['2', 'a\tb "c"', 'línea1\nlínea2']
+    ])
+  })
+
+  it('añade la cabecera si se pide', () => {
+    expect(toTsv([[1, 2]], ['a', 'b'])).toBe('a\tb\n1\t2')
+  })
+
+  it('lee lo que copia Excel: CRLF y salto final; "NULL" entre comillas es texto', () => {
+    expect(parseTsv('a\tb\r\nc\t\r\n')).toEqual([
+      ['a', 'b'],
+      ['c', '']
+    ])
+    expect(parseTsv('"NULL"\tNULL')).toEqual([['NULL', null]])
   })
 })

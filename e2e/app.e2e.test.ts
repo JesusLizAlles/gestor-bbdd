@@ -287,6 +287,40 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     expect(rows).toEqual([{ n: 0 }])
   })
 
+  it('selecciona arrastrando, copia como TSV y pega un bloque', async () => {
+    await view().getByTitle('Recargar (F5)').click()
+    await view().locator('.pager .range', { hasText: /1–/ }).waitFor()
+    const center = async (selector: string) => {
+      const box = (await view().locator(selector).boundingBox())!
+      return [box.x + box.width / 2, box.y + box.height / 2] as const
+    }
+    // Arrastrar desde nombre de la fila 1 hasta email de la fila 2.
+    await page.mouse.move(...(await center('[data-cell="0:1"]')))
+    await page.mouse.down()
+    await page.mouse.move(...(await center('[data-cell="1:2"]')), { steps: 5 })
+    await page.mouse.up()
+    await view().locator('.value-viewer', { hasText: '2 × 2 celdas seleccionadas' }).waitFor()
+    await page.keyboard.press('Control+c')
+    await expect
+      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe('Ana García\tana@example.com\nJohn Smith\tjohn@example.com')
+    // Pegar sobre las filas 3-4 deja los cambios pendientes, sin guardar.
+    await view().locator('[data-cell="2:1"]').click()
+    await page.keyboard.press('Control+v')
+    await view().locator('.edit-bar', { hasText: '2 filas modificadas' }).waitFor()
+    await view().locator('[data-cell="3:2"]', { hasText: 'john@example.com' }).waitFor()
+    await shot('15-seleccion-y-pegado')
+    await view().getByRole('button', { name: 'Descartar' }).click()
+    // Filas enteras por su número: Supr las marca para borrar.
+    await page.mouse.move(...(await center('[data-row="0"]')))
+    await page.mouse.down()
+    await page.mouse.move(...(await center('[data-row="1"]')), { steps: 3 })
+    await page.mouse.up()
+    await page.keyboard.press('Delete')
+    await view().locator('.edit-bar', { hasText: '2 para borrar' }).waitFor()
+    await view().getByRole('button', { name: 'Descartar' }).click()
+  })
+
   it('abre una consola en una base de datos con autocompletado por alias', async () => {
     const dbRow = page.locator('.tree-row', { hasText: DB })
     await dbRow.hover()
@@ -368,6 +402,29 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await filter.press('Enter')
     await expect(filter.inputValue()).resolves.toBe('importe > 1000')
     await view().locator('.pager .range', { hasText: /1–3 de/ }).waitFor()
+  })
+
+  it('el campo WHERE sugiere columnas y sintaxis, y colorea el filtro', async () => {
+    const filter = view().getByLabel('Filtro', { exact: true })
+    const suggestions = view().getByRole('listbox', { name: 'Sugerencias' })
+    await filter.fill('')
+    await filter.pressSequentially('esta')
+    await expect.poll(() => suggestions.getByRole('option').allInnerTexts()).toEqual([expect.stringContaining('estado')])
+    // Tab acepta y encadena los comparadores de la columna.
+    await filter.press('Tab')
+    await suggestions.getByRole('option', { name: /LIKE/ }).first().waitFor()
+    await filter.pressSequentially('=')
+    await filter.press('Escape')
+    await filter.pressSequentially(" 'confirmada' and entr")
+    await filter.press('Enter')
+    await expect(filter.inputValue()).resolves.toBe("estado = 'confirmada' and entrada ")
+    await filter.pressSequentially("< '2026-08-01'")
+    await filter.press('Enter')
+    await view().locator('.pager .range', { hasText: /1–1 de/ }).waitFor()
+    await expect(view().locator('.filter-layer .tok-string').first().innerText()).resolves.toBe("'confirmada'")
+    await expect(view().locator('.filter-layer .tok-column').first().innerText()).resolves.toBe('estado')
+    await shot('14-autocompletado-filtro')
+    await view().getByTitle('Quitar filtro').click()
   })
 
   it('cierra la pestaña activa con Ctrl+W', async () => {

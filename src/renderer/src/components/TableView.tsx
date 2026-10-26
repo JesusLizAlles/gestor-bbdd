@@ -18,6 +18,8 @@ import { PAGE_SIZES } from '@shared/types'
 import { ConfirmDialog } from './ConfirmDialog'
 import { DataGrid, type FocusRequest, type PendingEdits } from './DataGrid'
 import { FilterInput } from './FilterInput'
+import { Icon } from './Icon'
+import { Pager } from './Pager'
 
 export interface OpenTable {
   type: 'table'
@@ -170,6 +172,12 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
     return map
   }, [ready])
 
+  // Columnas para el autocompletado del filtro; mientras carga la estructura, las de la página.
+  const filterColumns = useMemo(
+    () => ready?.columns.map((c) => ({ name: c.name, dataType: c.dataType })) ?? page?.columns.map((c) => ({ name: c.name, dataType: c.type })) ?? [],
+    [ready, page?.columns]
+  )
+
   const applyFilter = (value: string) => {
     if (!discardPending()) return
     setWhere(value.trim())
@@ -196,6 +204,17 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
       return null
     } finally {
       setCounting(false)
+    }
+  }
+
+  const changePageSize = (value: number) => {
+    if (!discardPending()) return
+    setPageSize(value)
+    setOffset(0)
+    try {
+      localStorage.setItem('pageSize', String(value))
+    } catch {
+      /* sin almacenamiento local: solo dura esta sesión */
     }
   }
 
@@ -237,20 +256,52 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
     [page, ready]
   )
 
-  const editCell = (row: number, col: number, value: CellValue) => {
-    const current = changesRef.current
-    const edits: PendingEdits = new Map([...current.edits].map(([r, cols]) => [r, new Map(cols)]))
+  const copyEdits = (edits: PendingEdits): PendingEdits => new Map([...edits].map(([r, cols]) => [r, new Map(cols)]))
+
+  /** Apunta un valor en `edits`. En filas existentes, volver al valor original quita el cambio; en filas nuevas todo cuenta. */
+  const setEdit = (edits: PendingEdits, row: number, col: number, value: CellValue) => {
     const cols = edits.get(row) ?? new Map<number, CellValue>()
-    // En filas existentes, volver al valor original quita el cambio; en filas nuevas todo cuenta.
     const original = page?.rows[row]?.[col] ?? null
     const same = row < base && (value === original || (value !== null && original !== null && String(value) === String(original)))
     if (same) cols.delete(col)
     else cols.set(col, value)
     if (cols.size) edits.set(row, cols)
     else edits.delete(row)
+  }
+
+  const editCell = (row: number, col: number, value: CellValue) => {
+    const current = changesRef.current
+    const edits = copyEdits(current.edits)
+    setEdit(edits, row, col, value)
     setChanges({ ...current, edits })
     setSaveError(null)
     setNotice(null)
+  }
+
+  /**
+   * Pega un bloque desde (row, col). Lo que pasa del final crea filas nuevas, así se duplican filas
+   * copiadas; en ellas se omiten las columnas autoincrementales para que el servidor ponga el valor.
+   */
+  const pasteCells = (row: number, col: number, cells: CellValue[][]) => {
+    if (!editable || !page) return
+    const current = changesRef.current
+    const edits = copyEdits(current.edits)
+    const added = Math.max(0, row + cells.length - (base + current.newRows))
+    let count = 0
+    cells.forEach((values, i) => {
+      const r = row + i
+      if (current.deleted.has(r)) return
+      values.forEach((value, j) => {
+        const c = col + j
+        const info = ready?.columns.find((x) => x.name === page.columns[c]?.name)
+        if (c >= page.columns.length || (r >= base && info?.autoIncrement)) return
+        setEdit(edits, r, c, value)
+        count++
+      })
+    })
+    setChanges({ ...current, edits, newRows: current.newRows + added })
+    setSaveError(null)
+    setNotice(`Pegado: ${count} celda${count === 1 ? '' : 's'}${added ? ` · ${added} fila${added === 1 ? '' : 's'} nueva${added === 1 ? '' : 's'}` : ''}`)
   }
 
   const addRow = () => {
@@ -385,77 +436,30 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
     <div className="table-view" style={{ display: active ? 'flex' : 'none' }}>
       <div className="table-toolbar">
         <div className="segmented" role="tablist">
-          <button role="tab" aria-selected={view === 'data'} className={view === 'data' ? 'on' : ''} onClick={() => setView('data')}>
-            Datos
+          <button
+            role="tab"
+            aria-label="Datos"
+            title="Datos"
+            aria-selected={view === 'data'}
+            className={view === 'data' ? 'on' : ''}
+            onClick={() => setView('data')}
+          >
+            <Icon name="data" />
           </button>
           <button
             role="tab"
+            aria-label="Estructura"
+            title="Estructura"
             aria-selected={view === 'structure'}
             className={view === 'structure' ? 'on' : ''}
             onClick={() => setView('structure')}
           >
-            Estructura
+            <Icon name="structure" />
           </button>
         </div>
 
         {view === 'data' && (
           <>
-            <div className="pager">
-              <button className="icon" title="Primera página" disabled={offset === 0 || loading} onClick={() => goTo(0)}>
-                ⏮
-              </button>
-              <button
-                className="icon"
-                title="Página anterior"
-                disabled={offset === 0 || loading}
-                onClick={() => goTo(Math.max(0, offset - pageSize))}
-              >
-                ◀
-              </button>
-              <span className="range" aria-live="polite">
-                {range} de{' '}
-                {total !== null ? (
-                  total.toLocaleString('es-ES')
-                ) : (
-                  <button className="link" title="Contar filas" disabled={counting} onClick={() => void count()}>
-                    {counting ? '…' : '?'}
-                  </button>
-                )}
-              </span>
-              <button
-                className="icon"
-                title="Página siguiente"
-                disabled={!page?.hasMore || loading}
-                onClick={() => goTo(offset + pageSize)}
-              >
-                ▶
-              </button>
-              <button className="icon" title="Última página" disabled={!page?.hasMore || loading || counting} onClick={() => void goLast()}>
-                ⏭
-              </button>
-            </div>
-            <select
-              className="compact"
-              value={pageSize}
-              title="Filas por página"
-              onChange={(e) => {
-                if (!discardPending()) return
-                const value = Number(e.target.value)
-                setPageSize(value)
-                setOffset(0)
-                try {
-                  localStorage.setItem('pageSize', String(value))
-                } catch {
-                  /* sin almacenamiento local: solo dura esta sesión */
-                }
-              }}
-            >
-              {PAGE_SIZES.map((n) => (
-                <option key={n} value={n}>
-                  {n} filas
-                </option>
-              ))}
-            </select>
             <button className="icon" title="Recargar (F5)" disabled={loading} onClick={refresh}>
               ⟳
             </button>
@@ -464,25 +468,24 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
                 Cancelar
               </button>
             )}
-            <FilterInput
-              engine={engine}
-              connectionId={connection.id}
-              tableRef={ref}
-              value={draft}
-              applied={where}
-              onChange={setDraft}
-              onApply={applyFilter}
-            />
-            <button className="compact" disabled={!editable || loading} title="Añadir fila (Alt+Insert)" onClick={addRow}>
-              ＋ Fila
+            <span className="spacer" />
+            <button
+              className="icon"
+              disabled={!editable || loading}
+              title="Añadir fila (Alt+Insert)"
+              aria-label="Añadir fila"
+              onClick={addRow}
+            >
+              <Icon name="plus" />
             </button>
             <button
-              className="compact"
+              className="icon"
               disabled={!editable || selectedRows.length === 0}
               title="Borrar o restaurar las filas seleccionadas (Ctrl+Supr)"
+              aria-label="Borrar filas"
               onClick={() => deleteRows(selectedRows)}
             >
-              － Fila
+              <Icon name="minus" />
             </button>
             <select
               className="compact"
@@ -505,9 +508,12 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
           </>
         )}
         {view === 'structure' && (
-          <button className="icon" title="Recargar (F5)" onClick={refresh}>
-            ⟳
-          </button>
+          <>
+            <button className="icon" title="Recargar (F5)" onClick={refresh}>
+              ⟳
+            </button>
+            <span className="spacer" />
+          </>
         )}
         <button
           className="compact"
@@ -517,6 +523,21 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
           Consola
         </button>
       </div>
+
+      {view === 'data' && (
+        <div className="query-bar">
+          <FilterInput
+            engine={engine}
+            connectionId={connection.id}
+            tableRef={ref}
+            columns={filterColumns}
+            value={draft}
+            applied={where}
+            onChange={setDraft}
+            onApply={applyFilter}
+          />
+        </div>
+      )}
 
       {view === 'data' && (pendingAny || saveError) && (
         <div className={`edit-bar ${saveError ? 'error' : ''}`} role="status">
@@ -575,9 +596,25 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
               onSubmit={() => void save()}
               onAddRow={editable ? addRow : undefined}
               onDeleteRows={editable ? deleteRows : undefined}
+              onPaste={editable ? pasteCells : undefined}
               onSelectionChange={setSelectedRows}
               focusRequest={focusRequest}
-            />
+            >
+              <Pager
+                range={range}
+                total={total}
+                counting={counting}
+                pageSize={pageSize}
+                canPrev={offset > 0 && !loading}
+                canNext={!!page?.hasMore && !loading}
+                onCount={() => void count()}
+                onFirst={() => goTo(0)}
+                onPrev={() => goTo(Math.max(0, offset - pageSize))}
+                onNext={() => goTo(offset + pageSize)}
+                onLast={() => void goLast()}
+                onPageSize={changePageSize}
+              />
+            </DataGrid>
           )}
           {!error && !page && <div className="grid-empty">Cargando…</div>}
           {loading && page && <div className="loading-bar" />}
@@ -613,7 +650,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         )}
         {where && view === 'data' && <span className="filter-chip">Filtrado</span>}
         {view === 'data' && readOnlyReason && <span>{readOnlyReason}</span>}
-        {view === 'data' && editable && <span>Enter: editar · Alt+Insert: fila nueva · Ctrl+Supr: borrar</span>}
+        {view === 'data' && editable && <span>Enter: editar · Arrastrar: seleccionar · Ctrl+C/V: copiar y pegar · Alt+Insert: fila nueva · Ctrl+Supr: borrar</span>}
         {sort[0] && view === 'data' && (
           <span>
             Orden: {sort[0].column} {sort[0].direction === 'asc' ? '▲' : '▼'}

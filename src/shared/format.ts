@@ -63,3 +63,56 @@ export function toSqlInserts(result: QueryResult, engine: Engine, table?: string
       .join('\n') + '\n'
   )
 }
+
+// Portapapeles de la rejilla: texto separado por tabuladores, como lo copian y pegan Excel y DataGrip.
+// NULL viaja como la palabra NULL (sin comillas) para poder copiar y pegar filas sin perderlo.
+
+function tsvCell(value: CellValue | undefined): string {
+  if (value === null || value === undefined) return value === null ? 'NULL' : ''
+  const text = String(value)
+  return /[\t\n\r"]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
+/** Bloque de celdas → texto TSV (filas separadas por salto de línea). */
+export function toTsv(cells: (CellValue | undefined)[][], header?: string[]): string {
+  const lines = cells.map((row) => row.map(tsvCell).join('\t'))
+  if (header) lines.unshift(header.map((h) => tsvCell(h)).join('\t'))
+  return lines.join('\n')
+}
+
+/** Texto TSV → bloque de celdas. `NULL` sin comillas es null; las comillas dobles permiten tabuladores y saltos. */
+export function parseTsv(text: string): CellValue[][] {
+  const rows: CellValue[][] = []
+  let row: CellValue[] = []
+  let cell = ''
+  let quoted = false
+  let wasQuoted = false
+  const pushCell = () => {
+    row.push(!wasQuoted && cell === 'NULL' ? null : cell)
+    cell = ''
+    wasQuoted = false
+  }
+  // Excel termina con un salto de línea final: no es una fila vacía.
+  const src = text.replace(/\r\n?/g, '\n').replace(/\n$/, '')
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!
+    if (quoted) {
+      if (ch === '"' && src[i + 1] === '"') {
+        cell += '"'
+        i++
+      } else if (ch === '"') quoted = false
+      else cell += ch
+    } else if (ch === '"' && cell === '') {
+      quoted = true
+      wasQuoted = true
+    } else if (ch === '\t') pushCell()
+    else if (ch === '\n') {
+      pushCell()
+      rows.push(row)
+      row = []
+    } else cell += ch
+  }
+  pushCell()
+  rows.push(row)
+  return rows
+}

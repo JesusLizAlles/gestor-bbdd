@@ -231,10 +231,6 @@ export function App() {
           </div>
         )}
 
-        {activeSession?.connection.environment === 'prod' && (
-          <div className="prod-banner">Conexión de PRODUCCIÓN: {activeSession.connection.name}</div>
-        )}
-
         {tabs.map((t) =>
           t.type === 'table' ? (
             <TableView

@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { parseTsv, toTsv } from '@shared/format'
 import type { CellValue, ForeignKeyInfo, ResultColumn, SortSpec } from '@shared/types'
 
 const ROW_HEIGHT = 24
+const HEADER_HEIGHT = 40
 const CHAR_WIDTH = 7.4
 const MIN_WIDTH = 50
 const display = (v: CellValue): string => (v === null ? 'NULL' : String(v))
@@ -55,7 +57,26 @@ interface Props {
   /** Ctrl+Supr sobre las filas seleccionadas. */
   onDeleteRows?: (rows: number[]) => void
   onSelectionChange?: (rows: number[]) => void
+  /** Ctrl+V: bloque de valores a partir de una celda; las filas que sobran pasan a ser filas nuevas. */
+  onPaste?: (row: number, col: number, cells: CellValue[][]) => void
   focusRequest?: FocusRequest | null
+  /** Elementos flotantes sobre la rejilla (p. ej. la paginación), por encima del visor de valores. */
+  children?: ReactNode
+}
+
+interface Cell {
+  row: number
+  col: number
+}
+
+/** Qué se ha seleccionado: un rectángulo de celdas, filas enteras (por el número) o columnas enteras (por la cabecera). */
+type SelectionMode = 'cells' | 'rows' | 'columns'
+
+interface Drag {
+  mode: SelectionMode
+  /** Columna donde empezó un arrastre por las cabeceras: hasta que no se mueve es un clic (ordenar). */
+  startCol?: number
+  moved: boolean
 }
 
 interface Editing {
@@ -66,11 +87,16 @@ interface Editing {
 
 export function DataGrid(props: Props) {
   const { columns, rows, rowOffset = 0, sort = [], onSort, primaryKey, foreignKeys, onNavigate, pending, onEdit, onSubmit } = props
-  const { newRows = 0, deleted, placeholders, onAddRow, onDeleteRows, onSelectionChange, focusRequest } = props
+  const { newRows = 0, deleted, placeholders, onAddRow, onDeleteRows, onSelectionChange, onPaste, focusRequest } = props
   const scroller = useRef<HTMLDivElement>(null)
-  const [selected, setSelected] = useState<{ row: number; col: number } | null>(null)
-  // Ancla de la selección de varias filas (Mayús+clic / Mayús+flechas).
-  const [anchor, setAnchor] = useState<number | null>(null)
+  // Celda activa (cursor) y esquina opuesta del rectángulo seleccionado (arrastre, Mayús+clic, Mayús+flechas).
+  const [selected, setSelected] = useState<Cell | null>(null)
+  const [anchor, setAnchor] = useState<Cell | null>(null)
+  const [mode, setMode] = useState<SelectionMode>('cells')
+  const drag = useRef<Drag | null>(null)
+  const pointer = useRef<{ x: number; y: number } | null>(null)
+  // El clic que cierra un arrastre por las cabeceras no debe ordenar.
+  const suppressHeaderClick = useRef(false)
   const [editing, setEditingState] = useState<Editing | null>(null)
   // Copia síncrona: el blur que provocan Enter/Esc llega antes de que React actualice el estado.
   const editingRef = useRef<Editing | null>(null)
@@ -89,6 +115,7 @@ export function DataGrid(props: Props) {
   useEffect(() => {
     setSelected(null)
     setAnchor(null)
+    setMode('cells')
     setEditing(null)
   }, [rows])
 
@@ -106,13 +133,28 @@ export function DataGrid(props: Props) {
   const valueAt = (row: number, col: number): CellValue | undefined =>
     isPending(row, col) ? (pending!.get(row)!.get(col) ?? null) : isNew(row) ? undefined : (rows[row]?.[col] ?? null)
 
-  const selectedRows = useMemo(() => {
-    if (!selected) return []
-    const from = Math.min(anchor ?? selected.row, selected.row)
-    const to = Math.max(anchor ?? selected.row, selected.row)
-    return Array.from({ length: to - from + 1 }, (_, i) => from + i)
-  }, [selected, anchor])
-  const inRange = (row: number) => selectedRows.length > 1 && row >= selectedRows[0]! && row <= selectedRows.at(-1)!
+  /** Rectángulo seleccionado [r1..r2] × [c1..c2]. */
+  const rect = useMemo(() => {
+    if (!selected) return null
+    const a = anchor ?? selected
+    const lastCol = Math.max(0, columns.length - 1)
+    return {
+      r1: mode === 'columns' ? 0 : Math.min(a.row, selected.row),
+      r2: mode === 'columns' ? Math.max(0, total - 1) : Math.max(a.row, selected.row),
+      c1: mode === 'rows' ? 0 : Math.min(a.col, selected.col),
+      c2: mode === 'rows' ? lastCol : Math.max(a.col, selected.col)
+    }
+  }, [selected, anchor, mode, columns.length, total])
+  const multi = rect !== null && (rect.r1 !== rect.r2 || rect.c1 !== rect.c2)
+  const inRect = (row: number, col: number) => multi && row >= rect.r1 && row <= rect.r2 && col >= rect.c1 && col <= rect.c2
+  const rowInRect = (row: number) => multi && mode !== 'columns' && row >= rect.r1 && row <= rect.r2
+  const colInRect = (col: number) => multi && col >= rect.c1 && col <= rect.c2
+
+  // Filas afectadas por "borrar filas". Seleccionar columnas enteras no cuenta: no es elegir filas.
+  const selectedRows = useMemo(
+    () => (rect && mode !== 'columns' ? Array.from({ length: rect.r2 - rect.r1 + 1 }, (_, i) => rect.r1 + i) : []),
+    [rect, mode]
+  )
 
   useEffect(() => onSelectionChange?.(selectedRows), [selectedRows])
 
@@ -139,8 +181,11 @@ export function DataGrid(props: Props) {
   const moveTo = (row: number, col: number, extend = false) => {
     const r = Math.max(0, Math.min(total - 1, row))
     const c = Math.max(0, Math.min(columns.length - 1, col))
-    if (extend) setAnchor((a) => a ?? selected?.row ?? r)
-    else setAnchor(null)
+    if (extend) setAnchor((a) => a ?? selected ?? { row: r, col: c })
+    else {
+      setAnchor(null)
+      setMode('cells')
+    }
     setSelected({ row: r, col: c })
     virtualizer.scrollToIndex(r, { align: 'auto' })
     // El scroll horizontal se ajusta cuando la celda ya está pintada.
@@ -154,6 +199,7 @@ export function DataGrid(props: Props) {
     const current = valueAt(row, col)
     setSelected({ row, col })
     setAnchor(null)
+    setMode('cells')
     setEditing({ row, col, text: initial ?? (current === null || current === undefined ? '' : String(current)) })
   }
 
@@ -189,16 +235,30 @@ export function DataGrid(props: Props) {
       onSubmit?.()
       return
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Delete' && onDeleteRows && selected) {
+    // Ctrl+Supr siempre; Supr solo si se han seleccionado filas enteras por su número.
+    if (e.key === 'Delete' && (e.ctrlKey || e.metaKey || mode === 'rows') && onDeleteRows && selectedRows.length) {
       e.preventDefault()
       onDeleteRows(selectedRows)
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+      e.preventDefault()
+      setMode('cells')
+      setAnchor({ row: 0, col: 0 })
+      setSelected({ row: total - 1, col: columns.length - 1 })
+      return
+    }
+    if (e.key === 'Escape' && multi) {
+      e.preventDefault()
+      setAnchor(null)
+      setMode('cells')
       return
     }
     const keys: Record<string, () => void> = {
       ArrowDown: () => moveTo(cur.row + 1, cur.col, e.shiftKey),
       ArrowUp: () => moveTo(cur.row - 1, cur.col, e.shiftKey),
-      ArrowRight: () => moveTo(cur.row, cur.col + 1),
-      ArrowLeft: () => moveTo(cur.row, cur.col - 1),
+      ArrowRight: () => moveTo(cur.row, cur.col + 1, e.shiftKey),
+      ArrowLeft: () => moveTo(cur.row, cur.col - 1, e.shiftKey),
       PageDown: () => moveTo(cur.row + pageRows, cur.col, e.shiftKey),
       PageUp: () => moveTo(cur.row - pageRows, cur.col, e.shiftKey),
       Home: () => (e.ctrlKey ? moveTo(0, 0) : moveTo(cur.row, 0)),
@@ -216,9 +276,14 @@ export function DataGrid(props: Props) {
       action()
       return
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selectedValue !== undefined) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && rect) {
       e.preventDefault()
-      void navigator.clipboard.writeText(selectedValue === null ? '' : String(selectedValue))
+      copySelection(e.shiftKey)
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && onPaste && rect) {
+      e.preventDefault()
+      void pasteClipboard()
       return
     }
     // Ctrl+B, como en DataGrip: ir a la fila referenciada.
@@ -232,6 +297,167 @@ export function DataGrid(props: Props) {
       e.preventDefault()
       startEdit(selected.row, selected.col, e.key)
     }
+  }
+
+  /**
+   * Ctrl+C: una celda se copia tal cual; un bloque, como TSV (se pega en Excel o en otra rejilla).
+   * Ctrl+Mayús+C añade la fila de cabeceras.
+   */
+  const copySelection = (withHeader: boolean) => {
+    if (!rect) return
+    if (!multi && !withHeader) {
+      if (selectedValue !== undefined) void navigator.clipboard.writeText(selectedValue === null ? '' : String(selectedValue))
+      return
+    }
+    const cells: (CellValue | undefined)[][] = []
+    for (let r = rect.r1; r <= rect.r2; r++) {
+      const line: (CellValue | undefined)[] = []
+      for (let c = rect.c1; c <= rect.c2; c++) line.push(valueAt(r, c))
+      cells.push(line)
+    }
+    const header = withHeader ? columns.slice(rect.c1, rect.c2 + 1).map((c) => c.name) : undefined
+    void navigator.clipboard.writeText(toTsv(cells, header))
+  }
+
+  /** Ctrl+V: un solo valor rellena todo el bloque seleccionado; varios se pegan desde su esquina superior izquierda. */
+  const pasteClipboard = async () => {
+    if (!rect || !onPaste) return
+    let text: string
+    try {
+      text = await navigator.clipboard.readText()
+    } catch {
+      return
+    }
+    if (!text) return
+    let cells = parseTsv(text).map((line) => line.slice(0, columns.length - rect.c1))
+    const single = cells.length === 1 && cells[0]!.length === 1
+    if (single && multi) {
+      const value = cells[0]![0]!
+      cells = Array.from({ length: rect.r2 - rect.r1 + 1 }, () => Array.from({ length: rect.c2 - rect.c1 + 1 }, () => value))
+    }
+    onPaste(rect.r1, rect.c1, cells)
+    // Queda seleccionado lo pegado.
+    const width = Math.max(...cells.map((l) => l.length))
+    setMode('cells')
+    setAnchor({ row: rect.r1, col: rect.c1 })
+    setSelected({ row: rect.r1 + cells.length - 1, col: rect.c1 + width - 1 })
+  }
+
+  // Arrastre: mientras el botón sigue pulsado, la celda bajo el puntero amplía la selección y, cerca
+  // de los bordes, la rejilla se desplaza sola.
+  const dragFrame = useRef(0)
+  const dragTick = () => {
+    const d = drag.current
+    const el = scroller.current
+    const p = pointer.current
+    if (!d || !el || !p) return
+    const box = el.getBoundingClientRect()
+    const top = box.top + HEADER_HEIGHT
+    const left = box.left + numWidth
+    const speed = (overflow: number) => Math.max(-40, Math.min(40, overflow / 2))
+    if (d.mode !== 'columns') {
+      if (p.y < top) el.scrollTop += speed(p.y - top)
+      else if (p.y > box.bottom) el.scrollTop += speed(p.y - box.bottom)
+    }
+    if (d.mode !== 'rows') {
+      if (p.x < left) el.scrollLeft += speed(p.x - left)
+      else if (p.x > box.right) el.scrollLeft += speed(p.x - box.right)
+    }
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
+    const x = d.mode === 'rows' ? box.left + 2 : clamp(p.x, left + 1, box.right - 16)
+    const y = d.mode === 'columns' ? box.top + HEADER_HEIGHT / 2 : clamp(p.y, top + 1, box.bottom - 16)
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-cell], [data-row], [data-col]')
+    if (target?.dataset.cell) {
+      const [row, col] = target.dataset.cell.split(':').map(Number) as [number, number]
+      setSelected((s) => (s?.row === row && s.col === col ? s : { row, col: d.mode === 'rows' ? (s?.col ?? col) : col }))
+    } else if (target?.dataset.row) {
+      const row = Number(target.dataset.row)
+      setSelected((s) => (s?.row === row ? s : { row, col: s?.col ?? 0 }))
+    } else if (target?.dataset.col && d.mode === 'columns') {
+      const col = Number(target.dataset.col)
+      if (col !== d.startCol || d.moved) {
+        if (!d.moved) {
+          d.moved = true
+          setMode('columns')
+          setAnchor({ row: 0, col: d.startCol ?? col })
+        }
+        setSelected((s) => (s?.col === col ? s : { row: s?.row ?? 0, col }))
+      }
+    }
+    dragFrame.current = requestAnimationFrame(dragTick)
+  }
+
+  const startDrag = (e: MouseEvent, d: Drag) => {
+    drag.current = d
+    pointer.current = { x: e.clientX, y: e.clientY }
+    cancelAnimationFrame(dragFrame.current)
+    dragFrame.current = requestAnimationFrame(dragTick)
+  }
+
+  useEffect(() => {
+    const move = (e: globalThis.MouseEvent) => {
+      if (drag.current) pointer.current = { x: e.clientX, y: e.clientY }
+    }
+    const up = () => {
+      if (!drag.current) return
+      suppressHeaderClick.current = drag.current.mode === 'columns' && drag.current.moved
+      drag.current = null
+      cancelAnimationFrame(dragFrame.current)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      cancelAnimationFrame(dragFrame.current)
+    }
+  }, [])
+
+  const onCellMouseDown = (e: MouseEvent, row: number, col: number) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button, textarea')) return
+    if (editing && (editing.row !== row || editing.col !== col)) commitEdit()
+    e.preventDefault()
+    focusGrid()
+    if (e.shiftKey && selected) {
+      setAnchor((a) => a ?? selected)
+      setSelected({ row, col: mode === 'rows' ? selected.col : col })
+      startDrag(e, { mode: mode === 'rows' ? 'rows' : 'cells', moved: false })
+    } else {
+      setMode('cells')
+      setAnchor({ row, col })
+      setSelected({ row, col })
+      startDrag(e, { mode: 'cells', moved: false })
+    }
+  }
+
+  const onRowNumberMouseDown = (e: MouseEvent, row: number) => {
+    if (e.button !== 0) return
+    if (editing) commitEdit()
+    e.preventDefault()
+    focusGrid()
+    const col = selected?.col ?? 0
+    if (!(e.shiftKey && selected)) setAnchor({ row, col: 0 })
+    else setAnchor((a) => a ?? selected)
+    setMode('rows')
+    setSelected({ row, col })
+    startDrag(e, { mode: 'rows', moved: false })
+  }
+
+  const selectColumns = (col: number, extend: boolean) => {
+    if (!(extend && selected && mode === 'columns')) setAnchor({ row: 0, col })
+    setMode('columns')
+    setSelected((s) => ({ row: s?.row ?? 0, col }))
+    focusGrid()
+  }
+
+  /** Clic en la cabecera: ordenar. Ctrl/Mayús+clic o arrastrar: seleccionar columnas. */
+  const onHeaderClick = (e: MouseEvent, col: number) => {
+    if (suppressHeaderClick.current) {
+      suppressHeaderClick.current = false
+      return
+    }
+    if (e.ctrlKey || e.metaKey || e.shiftKey || !onSort) selectColumns(col, e.shiftKey)
+    else onSort(columns[col]!.name)
   }
 
   const onEditorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -278,118 +504,130 @@ export function DataGrid(props: Props) {
 
   return (
     <>
-      <div className="grid" ref={scroller} tabIndex={0} onKeyDown={onKeyDown} role="grid" aria-rowcount={total}>
-        <div className="grid-header" role="row">
-          <div className="grid-cell rownum" style={{ width: numWidth }}>
-            #
-          </div>
-          {columns.map((c, i) => {
-            const dir = sortOf(c.name)
-            const fk = fkIndexes.get(i)
-            return (
-              <div
-                key={i}
-                role="columnheader"
-                aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none'}
-                className={`grid-cell ${onSort ? 'sortable' : ''}`}
-                style={{ width: widths[i] }}
-                title={`${c.name} · ${c.type}${fk ? `\nReferencia a ${fk.refTable} (${fk.refColumns.join(', ')})` : ''}${onSort ? '\nClic: ordenar' : ''}`}
-                onClick={() => onSort?.(c.name)}
-              >
-                <span className="col-name">
-                  {primaryKey?.has(c.name) && <span className="pk-mark">🔑</span>}
-                  {c.name}
-                  {fk && <span className="fk-mark">↗</span>}
-                  {dir && <span className="sort-mark">{dir === 'asc' ? '▲' : '▼'}</span>}
-                </span>
-                <span className="type">{c.type.toLowerCase()}</span>
-                <span className="resize-handle" onMouseDown={(e) => startResize(e, i)} onClick={(e) => e.stopPropagation()} />
-              </div>
-            )
-          })}
-        </div>
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((item) => {
-            const rowIsNew = isNew(item.index)
-            const rowIsDeleted = isDeleted(item.index)
-            const rowEdited = !rowIsNew && (pending?.get(item.index)?.size ?? 0) > 0
-            const rowState = rowIsDeleted ? 'row-deleted' : rowIsNew ? 'row-new' : rowEdited ? 'row-modified' : ''
-            return (
-              <div
-                key={item.key}
-                role="row"
-                aria-label={rowIsDeleted ? 'Fila marcada para borrar' : rowIsNew ? 'Fila nueva' : undefined}
-                className={`grid-row ${selected?.row === item.index ? 'current' : ''} ${inRange(item.index) ? 'in-range' : ''} ${rowIsDeleted ? 'deleted' : ''}`}
-                style={{ position: 'absolute', top: 0, left: 0, transform: `translateY(${item.start}px)` }}
-              >
-                <div className={`grid-cell rownum ${rowState}`} style={{ width: numWidth }}>
-                  {rowIsNew ? '+' : rowOffset + item.index + 1}
+      <div className="grid-wrap">
+        <div className="grid" ref={scroller} tabIndex={0} onKeyDown={onKeyDown} role="grid" aria-rowcount={total}>
+          <div className="grid-header" role="row">
+            <div className="grid-cell rownum" style={{ width: numWidth }}>
+              #
+            </div>
+            {columns.map((c, i) => {
+              const dir = sortOf(c.name)
+              const fk = fkIndexes.get(i)
+              return (
+                <div
+                  key={i}
+                  role="columnheader"
+                  data-col={i}
+                  aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none'}
+                  className={`grid-cell ${onSort ? 'sortable' : ''} ${mode === 'columns' && colInRect(i) ? 'in-range' : ''}`}
+                  style={{ width: widths[i] }}
+                  title={`${c.name} · ${c.type}${fk ? `\nReferencia a ${fk.refTable} (${fk.refColumns.join(', ')})` : ''}${onSort ? '\nClic: ordenar' : ''}\nCtrl+clic o arrastrar: seleccionar columnas`}
+                  onMouseDown={(e) => {
+                    if (e.button !== 0) return
+                    e.preventDefault()
+                    startDrag(e, { mode: 'columns', startCol: i, moved: false })
+                  }}
+                  onClick={(e) => onHeaderClick(e, i)}
+                >
+                  <span className="col-name">
+                    {primaryKey?.has(c.name) && <span className="pk-mark">🔑</span>}
+                    {c.name}
+                    {fk && <span className="fk-mark">↗</span>}
+                    {dir && <span className="sort-mark">{dir === 'asc' ? '▲' : '▼'}</span>}
+                  </span>
+                  <span className="type">{c.type.toLowerCase()}</span>
+                  <span className="resize-handle" onMouseDown={(e) => startResize(e, i)} onClick={(e) => e.stopPropagation()} />
                 </div>
-                {columns.map((_, col) => {
-                  const value = valueAt(item.index, col)
-                  const modified = isPending(item.index, col)
-                  const isSelected = selected?.row === item.index && selected.col === col
-                  const isEditing = editing?.row === item.index && editing.col === col
-                  const linkable = !modified && !rowIsNew && !rowIsDeleted && value !== null && fkIndexes.has(col)
-                  const cls =
-                    value === undefined ? 'placeholder' : value === null ? 'null' : typeof value === 'number' ? 'num' : ''
-                  return (
-                    <div
-                      key={col}
-                      role="gridcell"
-                      data-cell={`${item.index}:${col}`}
-                      className={`grid-cell ${cls} ${isSelected ? 'selected' : ''} ${linkable ? 'linkable' : ''} ${modified ? 'modified' : ''} ${isEditing ? 'editing' : ''}`}
-                      style={{ width: widths[col] }}
-                      onClick={(e) => {
-                        if (editing && !isEditing) commitEdit()
-                        if (e.shiftKey && selected) setAnchor((a) => a ?? selected.row)
-                        else setAnchor(null)
-                        setSelected({ row: item.index, col })
-                        if (linkable && (e.ctrlKey || e.metaKey)) navigate(item.index, col)
-                      }}
-                      onDoubleClick={() => startEdit(item.index, col)}
-                    >
-                      {isEditing ? (
-                        <textarea
-                          className="cell-editor"
-                          aria-label={`Editar ${columns[col]?.name}`}
-                          autoFocus
-                          rows={1}
-                          value={editing.text}
-                          onFocus={(e) => e.currentTarget.select()}
-                          onChange={(e) => setEditing({ ...editing, text: e.target.value })}
-                          onKeyDown={onEditorKeyDown}
-                          onBlur={() => commitEdit()}
-                        />
-                      ) : (
-                        <span className="cell-text">{value === undefined ? (placeholders?.[col] ?? '') : display(value)}</span>
-                      )}
-                      {linkable && !isEditing && (
-                        <button
-                          className="cell-link"
-                          title="Ir a la fila referenciada (Ctrl+clic o Ctrl+B)"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            navigate(item.index, col)
-                          }}
-                        >
-                          ↗
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const rowIsNew = isNew(item.index)
+              const rowIsDeleted = isDeleted(item.index)
+              const rowEdited = !rowIsNew && (pending?.get(item.index)?.size ?? 0) > 0
+              const rowState = rowIsDeleted ? 'row-deleted' : rowIsNew ? 'row-new' : rowEdited ? 'row-modified' : ''
+              return (
+                <div
+                  key={item.key}
+                  role="row"
+                  aria-label={rowIsDeleted ? 'Fila marcada para borrar' : rowIsNew ? 'Fila nueva' : undefined}
+                  className={`grid-row ${selected?.row === item.index ? 'current' : ''} ${rowIsDeleted ? 'deleted' : ''}`}
+                  style={{ position: 'absolute', top: 0, left: 0, transform: `translateY(${item.start}px)` }}
+                >
+                  <div
+                    className={`grid-cell rownum ${rowState} ${rowInRect(item.index) ? 'in-range' : ''}`}
+                    data-row={item.index}
+                    style={{ width: numWidth }}
+                    title="Clic o arrastrar: seleccionar filas"
+                    onMouseDown={(e) => onRowNumberMouseDown(e, item.index)}
+                  >
+                    {rowIsNew ? '+' : rowOffset + item.index + 1}
+                  </div>
+                  {columns.map((_, col) => {
+                    const value = valueAt(item.index, col)
+                    const modified = isPending(item.index, col)
+                    const isSelected = selected?.row === item.index && selected.col === col
+                    const isEditing = editing?.row === item.index && editing.col === col
+                    const linkable = !modified && !rowIsNew && !rowIsDeleted && value !== null && fkIndexes.has(col)
+                    const cls =
+                      value === undefined ? 'placeholder' : value === null ? 'null' : typeof value === 'number' ? 'num' : ''
+                    return (
+                      <div
+                        key={col}
+                        role="gridcell"
+                        data-cell={`${item.index}:${col}`}
+                        className={`grid-cell ${cls} ${isSelected ? 'selected' : ''} ${inRect(item.index, col) ? 'in-range' : ''} ${linkable ? 'linkable' : ''} ${modified ? 'modified' : ''} ${isEditing ? 'editing' : ''}`}
+                        style={{ width: widths[col] }}
+                        onMouseDown={(e) => onCellMouseDown(e, item.index, col)}
+                        onClick={(e) => {
+                          if (linkable && (e.ctrlKey || e.metaKey) && !e.shiftKey) navigate(item.index, col)
+                        }}
+                        onDoubleClick={() => startEdit(item.index, col)}
+                      >
+                        {isEditing ? (
+                          <textarea
+                            className="cell-editor"
+                            aria-label={`Editar ${columns[col]?.name}`}
+                            autoFocus
+                            rows={1}
+                            value={editing.text}
+                            onFocus={(e) => e.currentTarget.select()}
+                            onChange={(e) => setEditing({ ...editing, text: e.target.value })}
+                            onKeyDown={onEditorKeyDown}
+                            onBlur={() => commitEdit()}
+                          />
+                        ) : (
+                          <span className="cell-text">{value === undefined ? (placeholders?.[col] ?? '') : display(value)}</span>
+                        )}
+                        {linkable && !isEditing && (
+                          <button
+                            className="cell-link"
+                            title="Ir a la fila referenciada (Ctrl+clic o Ctrl+B)"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate(item.index, col)
+                            }}
+                          >
+                            ↗
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+          {total === 0 && <div className="grid-empty">Sin filas</div>}
         </div>
-        {total === 0 && <div className="grid-empty">Sin filas</div>}
+        {props.children}
       </div>
       {selected && (
         <div className="value-viewer">
           <span className="value-text">
             <strong>{columns[selected.col]?.name}</strong> ({isNew(selected.row) ? 'fila nueva' : `fila ${rowOffset + selected.row + 1}`}
-            {selectedRows.length > 1 ? ` · ${selectedRows.length} filas seleccionadas` : ''}):{' '}
+            {multi && rect ? selectionSummary(rect, mode) : ''}):{' '}
             {viewerText(selected.col, selectedValue)}
           </span>
           {editable && !isDeleted(selected.row) && (
@@ -413,4 +651,14 @@ export function DataGrid(props: Props) {
       )}
     </>
   )
+}
+
+/** Resumen para el visor: "· 3 filas seleccionadas", "· 2 columnas seleccionadas" o "· 3 × 2 celdas seleccionadas". */
+function selectionSummary(rect: { r1: number; r2: number; c1: number; c2: number }, mode: SelectionMode): string {
+  const rows = rect.r2 - rect.r1 + 1
+  const cols = rect.c2 - rect.c1 + 1
+  const colText = `${cols} columna${cols === 1 ? '' : 's'}`
+  if (mode === 'columns') return ` · ${colText} seleccionada${cols === 1 ? '' : 's'}`
+  const rowText = ` · ${rows} fila${rows === 1 ? '' : 's'} seleccionada${rows === 1 ? '' : 's'}`
+  return mode === 'rows' || cols === 1 ? rowText : ` · ${rows} × ${cols} celdas seleccionadas`
 }

@@ -309,6 +309,9 @@ input[type='checkbox'] {
   color: var(--text);
   border-top-color: var(--accent);
 }
+.tab.env-tab-prod {
+  border-top-color: rgba(229, 83, 75, 0.45);
+}
 .tab.env-tab-prod.active {
   border-top-color: var(--env-prod);
 }
@@ -331,14 +334,6 @@ input[type='checkbox'] {
 .toolbar .hint {
   color: var(--text-dim);
   font-size: 12px;
-}
-.prod-banner {
-  background: rgba(229, 83, 75, 0.15);
-  color: #ffb3ae;
-  border-bottom: 1px solid var(--env-prod);
-  padding: 3px 10px;
-  font-size: 12px;
-  flex: none;
 }
 
 .workspace {
@@ -414,6 +409,13 @@ input[type='checkbox'] {
   flex: none;
 }
 
+.grid-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
 .grid {
   flex: 1;
   overflow: auto;
@@ -667,30 +669,91 @@ kbd {
   flex: none;
 }
 .segmented button {
+  display: inline-flex;
+  align-items: center;
   border: none;
   border-radius: 0;
   background: none;
   color: var(--text-dim);
-  padding: 3px 12px;
+  padding: 0 8px;
 }
 .segmented button.on {
   background: var(--bg-raised);
   color: var(--text);
 }
+/* Paginación flotante, centrada abajo sobre la rejilla. */
 .pager {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 4;
   display: flex;
   align-items: center;
   gap: 2px;
-  flex: none;
+  padding: 3px 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+.pager button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 5px;
 }
 .pager .range {
-  min-width: 120px;
-  text-align: center;
+  padding: 0 6px;
   font-variant-numeric: tabular-nums;
   color: var(--text-dim);
+  font-size: 12px;
 }
 .pager .range .link {
-  font-size: 13px;
+  font-size: 12px;
+}
+.pager .range-size {
+  color: var(--text);
+}
+.pager .range-size .svg-icon {
+  display: inline-block;
+  vertical-align: -4px;
+  margin-left: 1px;
+}
+.pager .range-size:hover {
+  text-decoration: none;
+  color: var(--accent-hover);
+}
+.pager-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 4px 0;
+  min-width: 170px;
+}
+.pager-option {
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pager-option:hover {
+  background: var(--bg-hover);
+}
+.pager-option.on {
+  color: var(--accent-hover);
+}
+/* Hueco al final de la rejilla para que la paginación no tape la última fila. */
+.table-body .grid {
+  padding-bottom: 52px;
 }
 select.compact,
 button.compact {
@@ -1018,8 +1081,22 @@ button.compact {
   text-decoration: line-through;
   color: #b07a76;
 }
-.grid-row.in-range {
-  background: #243049 !important;
+.grid-cell.in-range {
+  background: rgba(53, 116, 240, 0.2);
+}
+.grid-cell.selected.in-range {
+  background: rgba(53, 116, 240, 0.32);
+}
+.grid-row .grid-cell.rownum {
+  cursor: pointer;
+}
+.grid-row .grid-cell.rownum.in-range,
+.grid-header .grid-cell.in-range {
+  background: var(--bg-select);
+  color: var(--text);
+}
+.grid {
+  user-select: none;
 }
 .grid-cell.placeholder .cell-text {
   color: #6f737a;
@@ -1228,4 +1305,182 @@ button.compact.on {
 }
 .update-dialog a {
   color: var(--accent-hover);
+}
+
+/* Filtro WHERE coloreado: el texto del campo es transparente y se ve la capa de debajo. */
+.filter-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+.filter-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  /* Mismo relleno y borde que el input para que los caracteres coincidan. */
+  padding: 5px 8px 5px 0;
+  white-space: pre;
+  color: var(--text);
+}
+.filter-layer > div {
+  display: inline-block;
+  will-change: transform;
+}
+.filter .filter-field input {
+  color: transparent;
+  caret-color: var(--text);
+}
+.filter .filter-field input::placeholder {
+  color: var(--text-dim);
+}
+.filter .filter-field input::selection {
+  color: transparent;
+  background: rgba(53, 116, 240, 0.45);
+}
+.tok-keyword {
+  color: #cf8e6d;
+}
+.tok-string {
+  color: #6aab73;
+}
+.tok-number {
+  color: #2aacb8;
+}
+.tok-function {
+  color: #56a8f5;
+}
+.tok-column {
+  color: #c77dbb;
+}
+.tok-comment {
+  color: #7a7e85;
+  font-style: italic;
+}
+.tok-operator {
+  color: #bcbec4;
+}
+
+/* Sugerencias del filtro */
+.filter-menu.suggest {
+  min-width: 320px;
+  max-width: 520px;
+  max-height: 280px;
+}
+.filter-option.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+}
+.suggestion-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.suggestion-detail {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: system-ui, sans-serif;
+}
+.kind-mark {
+  flex: none;
+  width: 18px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--bg-raised);
+}
+.kind-column {
+  background: #8a5a84;
+}
+.kind-keyword,
+.kind-operator {
+  background: #8f6247;
+}
+.kind-function {
+  background: #3d6d99;
+}
+.kind-value {
+  background: #4b7a50;
+}
+
+/* Barra del visor de tablas: todos los controles a la misma altura. */
+.table-toolbar {
+  --control-h: 28px;
+}
+.table-toolbar > button,
+.table-toolbar > select,
+.table-toolbar .segmented {
+  height: var(--control-h);
+}
+.table-toolbar > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.table-toolbar > button.icon {
+  min-width: var(--control-h);
+  padding: 0 6px;
+}
+.table-toolbar > select {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.table-toolbar .segmented button {
+  height: 100%;
+}
+/* Barra propia del filtro WHERE, a todo el ancho bajo la barra principal. */
+.query-bar {
+  --control-h: 30px;
+  flex: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.query-bar .filter {
+  height: var(--control-h);
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 0 -1px 0 transparent;
+}
+.query-bar .filter:focus-within {
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+.query-bar .filter-label {
+  padding-left: 10px;
+}
+.query-bar .filter .filter-field {
+  align-self: stretch;
+}
+.query-bar .filter input {
+  height: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: var(--control-h);
+}
+.query-bar .filter .filter-layer {
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: var(--control-h);
+}
+.query-bar .filter button.icon {
+  height: calc(var(--control-h) - 6px);
+  margin-right: 4px;
+}
+.query-bar .filter-menu {
+  left: 56px;
+  top: 100%;
+}
+.svg-icon {
+  display: block;
+  flex: none;
 }

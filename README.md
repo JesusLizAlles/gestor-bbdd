@@ -21,14 +21,27 @@ se genera por detrás.
   - Orden al pulsar la cabecera (▲, ▼, sin orden). Sin orden, se pagina por clave primaria para que las páginas sean estables.
   - Filtro `WHERE` opcional: solo admite una condición de lectura; se rechaza cualquier escritura o segunda sentencia.
     Recuerda los últimos 30 filtros que han funcionado en cada tabla. Para recuperarlos: botón ▾, o <kbd>↓</kbd> en el campo y luego flechas y <kbd>Enter</kbd>.
-  - Columnas redimensionables y navegación con teclado: flechas, RePág/AvPág, Inicio/Fin, Ctrl+Inicio/Fin y Ctrl+C para copiar.
+    Se colorea como código (columnas, palabras clave, cadenas, números, funciones) y sugiere mientras se escribe, o con
+    <kbd>Ctrl</kbd>+<kbd>Espacio</kbd>: columnas de la tabla, comparadores tras una columna (`LIKE '%…%'`, `IN (…)`,
+    `BETWEEN`, `IS NULL`…), valores según el tipo (en fechas, hoy, `CURDATE()`/`GETDATE()`, hace 7 días…), funciones
+    del motor y `AND`/`OR`. <kbd>Tab</kbd> o <kbd>Enter</kbd> aceptan la sugerencia marcada; <kbd>Esc</kbd> cierra la lista.
+  - Columnas redimensionables y navegación con teclado: flechas, RePág/AvPág, Inicio/Fin, Ctrl+Inicio/Fin.
+  - **Selección de bloques**: arrastrando sobre las celdas (la rejilla se desplaza sola al llegar al borde), sobre los
+    números de fila (filas enteras) o sobre las cabeceras (columnas enteras; también <kbd>Ctrl</kbd>+clic). También con
+    <kbd>Shift</kbd>+clic, <kbd>Shift</kbd>+flechas y <kbd>Ctrl</kbd>+<kbd>A</kbd>. Un clic simple en la cabecera sigue ordenando.
+  - <kbd>Ctrl</kbd>+<kbd>C</kbd> copia el bloque como texto separado por tabuladores (se pega tal cual en Excel);
+    <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> incluye las cabeceras. NULL se copia como `NULL`.
   - **Navegación por claves foráneas**: botón ↗, Ctrl+clic o Ctrl+B en una celda abren la fila referenciada.
   - Exportar la página a CSV, CSV para Excel, JSON o `INSERT`.
 - **Edición en la rejilla**, al estilo JetBrains:
   - Para editar: <kbd>Enter</kbd>, <kbd>F2</kbd>, doble clic o empezar a escribir sobre la celda. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserta un salto de línea; <kbd>Esc</kbd> cancela.
+  - **Pegar** (<kbd>Ctrl</kbd>+<kbd>V</kbd>): un bloque copiado (de la propia rejilla o de Excel) se pega desde la celda
+    seleccionada; un único valor rellena todo el bloque seleccionado. Si sobran filas se crean filas nuevas, sin copiar las
+    columnas autoincrementales: para duplicar filas, cópialas, añade una fila con <kbd>Alt</kbd>+<kbd>Insert</kbd> y pega.
   - Los cambios quedan pendientes y resaltados. **<kbd>Alt</kbd>+<kbd>Enter</kbd>** los guarda; «Descartar» los deshace. «NULL» pone la celda a NULL.
-  - **Filas nuevas**: <kbd>Alt</kbd>+<kbd>Insert</kbd> o «＋ Fila». La fila aparece al final y empieza a editarse. Las celdas vacías muestran qué recibirán: `(auto)`, `(valor por defecto)`, `NULL` u `(obligatorio)`.
-  - **Borrar filas**: <kbd>Ctrl</kbd>+<kbd>Supr</kbd> o «－ Fila» sobre la selección (<kbd>Shift</kbd>+clic o <kbd>Shift</kbd>+flechas para varias). Quedan tachadas hasta guardar; repetir el atajo las restaura. Una fila nueva sin guardar simplemente se quita.
+  - **Filas nuevas**: <kbd>Alt</kbd>+<kbd>Insert</kbd> o el botón +. La fila aparece al final y empieza a editarse. Las celdas vacías muestran qué recibirán: `(auto)`, `(valor por defecto)`, `NULL` u `(obligatorio)`.
+  - **Borrar filas**: <kbd>Ctrl</kbd>+<kbd>Supr</kbd> o el botón − sobre las filas de la selección; con filas enteras
+    seleccionadas por su número basta <kbd>Supr</kbd>. Quedan tachadas hasta guardar; repetir el atajo las restaura. Una fila nueva sin guardar simplemente se quita.
   - Todo se guarda con sentencias con parámetros en una sola transacción: primero los borrados, luego los cambios y por último las altas. Así se puede borrar una fila y volver a crearla con la misma clave.
   - Las filas se localizan por su clave primaria.
   - Si alguna fila ya no existe o cambió su clave, no se guarda nada y se indica cuál.
