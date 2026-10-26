@@ -799,6 +799,10 @@ input[type='checkbox'] {
   padding: 0;
   font-size: 12px;
 }
+button.link:hover:not(:disabled) {
+  background: none;
+  text-decoration: underline;
+}
 .stmt-list {
   font-family: var(--mono);
   font-size: 12px;
@@ -1148,6 +1152,110 @@ button.compact {
   padding: 10px;
   overflow: auto;
   max-width: 1000px;
+}
+
+/* Edición de la estructura */
+.structure-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.structure-pane[hidden] {
+  display: none;
+}
+.structure h3 .link {
+  margin-left: 10px;
+  font-weight: normal;
+}
+.structure-edit {
+  max-width: 1200px;
+}
+.structure-edit th,
+.structure-edit td {
+  padding: 2px 6px;
+  height: 30px;
+}
+.structure-edit .center {
+  text-align: center;
+  width: 48px;
+}
+.structure-edit .row-tools {
+  width: 32px;
+  text-align: center;
+}
+/* Inputs que parecen texto hasta pasar el ratón o editarlos. */
+.cell-input {
+  height: 24px;
+  padding: 0 6px;
+  border-color: transparent;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.cell-input.plain {
+  font-family: inherit;
+  font-size: 13px;
+}
+.cell-input:hover:not([readonly]) {
+  border-color: var(--border);
+}
+.cell-input:focus:not([readonly]) {
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.cell-input[readonly]:focus {
+  border-color: transparent;
+}
+/* Detrás de :focus para que el borde rojo se vea también mientras se escribe. */
+.structure-edit .cell-input.invalid {
+  border-color: var(--danger);
+}
+input[type='checkbox'].invalid {
+  outline: 1px solid var(--danger);
+}
+.structure-edit td.changed {
+  background: rgba(224, 168, 74, 0.14);
+}
+.structure-edit td.changed .cell-input,
+.structure-edit .changed-text {
+  color: #f0c674;
+}
+.structure-edit tr.row-changed td:first-child {
+  box-shadow: inset 3px 0 0 var(--warn);
+}
+.structure-edit tr.row-added td:first-child {
+  box-shadow: inset 3px 0 0 var(--ok);
+}
+.structure-edit tr.row-added .cell-input {
+  color: var(--ok);
+}
+.structure-edit tr.row-dropped {
+  background: rgba(229, 83, 75, 0.1);
+}
+.structure-edit tr.row-dropped td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+.structure-edit tr.row-dropped .cell-input,
+.structure-edit tr.row-dropped .fk-text {
+  text-decoration: line-through;
+  color: #b07a76;
+}
+.structure-edit .pk-name {
+  padding-left: 13px;
+}
+.edit-bar .bar-issue {
+  color: #ffb3ae;
+}
+.dialog.wide {
+  width: 860px;
+}
+.review-sql {
+  max-height: 50vh;
+  margin: 0;
+  max-width: none;
+  white-space: pre;
+  user-select: text;
 }
 
 /* Acciones en filas del árbol, visibles al pasar el ratón */

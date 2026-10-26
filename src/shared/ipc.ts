@@ -23,6 +23,7 @@ export const API_CHANNELS = [
   'countTableRows',
   'tableStructure',
   'saveRowChanges',
+  'alterTable',
   'runQuery',
   'queryHistory',
   'filterHistory',

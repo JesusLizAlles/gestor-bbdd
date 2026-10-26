@@ -54,7 +54,18 @@ se genera por detrás.
   - En producción se pide confirmación mostrando las sentencias.
   - No se puede editar en vistas, tablas sin clave primaria ni conexiones de solo lectura.
   - Si hay cambios sin guardar, se avisa antes de cambiar de página, orden o filtro.
-- **Estructura** de cada tabla: columnas, índices, claves foráneas (con enlace a la tabla referenciada) y DDL.
+- **Estructura** de cada tabla: columnas, índices, claves foráneas (con enlace a la tabla referenciada) y DDL. Se edita directamente:
+  - Columnas: nombre, tipo (con sugerencias), nulos, valor por defecto (expresión SQL: `'texto'`, `0`, `CURRENT_TIMESTAMP`…),
+    autoincremento, clave primaria (🔑) y, en MySQL, comentario. «+ Añadir columna» la añade al final; − la borra.
+  - Índices: añadir, cambiar (nombre, columnas separadas por comas, único) y borrar. Claves foráneas: borrar.
+  - Los cambios quedan resaltados (modificado, nuevo, tachado) y se validan al escribir. **<kbd>Alt</kbd>+<kbd>Enter</kbd>**
+    o «Revisar SQL…» enseña las sentencias generadas; se aplican, se copian o se abren en una consola. «Descartar» lo deshace todo.
+  - MySQL: un único `ALTER TABLE` (las claves foráneas se quitan antes en otro). Al cambiar una columna se conservan su
+    intercalación, comentario, `ON UPDATE` y expresión si es calculada (las calculadas solo se renombran o se borran).
+  - SQL Server: todo en una transacción. Renombra con `sp_rename`, cambia los `DEFAULT` por su nombre de restricción y quita y
+    vuelve a crear la clave primaria o los índices que impiden un `ALTER COLUMN`.
+  - Si la tabla ha cambiado desde que se cargó (otra persona, otra consola), no se aplica nada y se pide recargar.
+  - En producción, el botón es «Aplicar en producción». No se edita en vistas ni en conexiones de solo lectura.
 - **Consola SQL** (botón ⌨ junto a la conexión o a una base de datos, o «Consola» desde una tabla):
   - Una consola por conexión y base de datos. Lo escrito se guarda solo, con el cursor, la selección, el desplazamiento y la base elegida. Al volver a abrirla, también tras reiniciar la app, sigue donde se dejó. «Consola» desde una tabla añade su `SELECT` al final.
   - Selector de base de datos. El autocompletado ofrece las tablas y columnas de la base elegida.
@@ -230,6 +241,11 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
   - En DataGrip, guardar es <kbd>Ctrl</kbd>+<kbd>Enter</kbd>; aquí es <kbd>Alt</kbd>+<kbd>Enter</kbd>.
   - Las filas nuevas van a la página actual hasta guardar. Después, la tabla se recarga y la fila aparece donde le corresponda por orden (puede ser otra página).
   - En tablas sin clave primaria no se puede añadir, modificar ni borrar desde la rejilla; para eso está la consola.
+- **Editor de estructura:**
+  - MySQL no deshace el DDL: si de dos sentencias falla la segunda, la primera queda aplicada (se avisa y se recarga).
+  - Las columnas nuevas van al final; no se reordenan columnas.
+  - No crea claves foráneas ni edita CHECK, particiones u opciones de tabla: para eso, la consola («Abrir en consola» parte del SQL generado).
+  - SQL Server: no se puede poner ni quitar `IDENTITY` en una columna existente, ni editar comentarios (`MS_Description`).
 - **Visor:**
   - Ordena por una sola columna a la vez.
   - El filtro admite subconsultas de lectura.

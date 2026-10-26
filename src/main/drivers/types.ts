@@ -43,6 +43,11 @@ export interface DbDriver {
    * una fila; si alguno no, se deshace todo y se lanza un error.
    */
   executeChanges(statements: ParamStatement[]): Promise<void>
+  /**
+   * Aplica sentencias de estructura en orden; devuelve cuántas. Si una falla lanza DdlError con las
+   * que quedaron aplicadas (SQL Server las hace en una transacción: 0).
+   */
+  executeDdl(statements: string[]): Promise<number>
   /** Ejecuta una sentencia; puede devolver varios resultados (procedimientos, lotes T-SQL). */
   execute(statement: string, options: ExecuteOptions): Promise<QueryResult[]>
   cancel(): Promise<void>

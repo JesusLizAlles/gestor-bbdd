@@ -100,6 +100,16 @@ export interface ColumnInfo {
   defaultValue: string | null
   /** AUTO_INCREMENT (MySQL) o IDENTITY (SQL Server): el servidor pone el valor al insertar. */
   autoIncrement: boolean
+  /** Comentario de la columna (solo MySQL). */
+  comment?: string | null
+  /** Intercalación de las columnas de texto: se conserva al modificarlas. */
+  collation?: string | null
+  /** MySQL: ON UPDATE CURRENT_TIMESTAMP y similares; se conserva al modificar la columna. */
+  onUpdate?: string | null
+  /** Columna calculada: solo se puede renombrar o borrar. */
+  generated?: { expression: string; stored: boolean } | null
+  /** SQL Server: nombre de la restricción DEFAULT, para poder cambiarla o quitarla. */
+  defaultConstraint?: string | null
 }
 
 export interface CompletionColumn {
@@ -180,6 +190,8 @@ export interface IndexInfo {
   columns: string[]
   unique: boolean
   primary: boolean
+  /** SQL Server: UNIQUE creado como restricción (se quita con DROP CONSTRAINT, no DROP INDEX). */
+  uniqueConstraint?: boolean
 }
 
 export interface ForeignKeyInfo {
@@ -229,6 +241,55 @@ export interface RowChangesOutput {
   /** Conexión de producción sin confirmar: no se guardó nada y se devuelve qué se haría. */
   needsConfirmation?: boolean
   preview?: string[]
+}
+
+/** Columna tal como queda en el editor de estructura. */
+export interface ColumnDesign {
+  /** Nombre en la tabla actual; null = columna nueva. */
+  original: string | null
+  name: string
+  dataType: string
+  nullable: boolean
+  /** Expresión SQL tal cual (`'texto'`, `0`, `CURRENT_TIMESTAMP`); null = sin valor por defecto. */
+  defaultValue: string | null
+  autoIncrement: boolean
+  primaryKey: boolean
+  /** Solo MySQL. */
+  comment: string | null
+}
+
+export interface IndexDesign {
+  /** Nombre en la tabla actual; null = índice nuevo. */
+  original: string | null
+  name: string
+  columns: string[]
+  unique: boolean
+}
+
+/** La tabla como la quiere el usuario; el SQL sale de compararla con la estructura actual. */
+export interface TableDesign {
+  /** Las columnas que se quedan, en orden; las que faltan se borran. */
+  columns: ColumnDesign[]
+  /** Índices sin la clave primaria (va en las columnas). */
+  indexes: IndexDesign[]
+  dropForeignKeys: string[]
+}
+
+export interface AlterTableInput extends TableRef {
+  design: TableDesign
+  /** structureSignature de la estructura sobre la que se hizo el diseño. */
+  base: string
+  /** El SQL que vio y aceptó el usuario: solo se ejecuta si es exactamente ese. */
+  expected: string[]
+  /** El usuario confirmó modificar la estructura en una conexión de producción. */
+  confirmedWrite?: boolean
+}
+
+export interface AlterTableOutput {
+  /** Sentencias aplicadas. Si hubo error, las anteriores a la que falló (en MySQL no se deshacen). */
+  executed: number
+  total: number
+  error?: string
 }
 
 /** Una ejecución en la consola, tal como la registra el proceso principal. */
@@ -343,6 +404,8 @@ export interface DbApi {
   countTableRows(sessionId: string, input: TableRef & { where?: string }): Promise<number>
   tableStructure(sessionId: string, ref: TableRef): Promise<TableStructure>
   saveRowChanges(sessionId: string, input: RowChangesInput): Promise<RowChangesOutput>
+  /** Aplica los cambios del editor de estructura (ALTER TABLE y compañía). */
+  alterTable(sessionId: string, input: AlterTableInput): Promise<AlterTableOutput>
   runQuery(sessionId: string, input: RunQueryInput): Promise<RunQueryOutput>
   /** Historial de la consola de una conexión, del más reciente al más antiguo. */
   queryHistory(connectionId: string, search?: string): Promise<QueryHistoryEntry[]>

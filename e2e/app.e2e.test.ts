@@ -443,6 +443,75 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await view().getByTitle('Quitar filtro').click()
   })
 
+  it('edita la estructura: renombra, cambia el tipo y añade una columna; revisa el SQL y lo aplica', async () => {
+    await page.locator('.tree-row', { hasText: 'eventos' }).dblclick()
+    await tab('eventos').and(page.locator('.active')).waitFor()
+    // Columnas desplegadas en el árbol: tienen que reflejar el cambio al aplicarlo.
+    if ((await page.locator('.tree-row', { hasText: 'descripcion' }).count()) === 0) await page.locator('.tree-row', { hasText: 'eventos' }).click()
+    await page.locator('.tree-row', { hasText: 'descripcion' }).waitFor()
+    await view().getByRole('tab', { name: 'Estructura' }).click()
+    await view().getByLabel('Nombre de la columna').nth(1).fill('texto')
+    await view().getByLabel('Tipo de texto').fill('varchar(80)')
+    await view().getByRole('button', { name: '+ Añadir columna' }).click()
+    // La columna nueva entra con el nombre seleccionado: se escribe encima.
+    await page.keyboard.type('creado')
+    await view().getByLabel('Tipo de creado').fill('datetime')
+    const def = view().getByLabel('Valor por defecto de creado')
+    await def.fill("'sin cerrar")
+    await view().locator('.edit-bar', { hasText: 'Hay comillas sin cerrar' }).waitFor()
+    await shot('17a-estructura-error')
+    await expect(view().getByRole('button', { name: 'Revisar SQL…' }).isDisabled()).resolves.toBe(true)
+    await def.fill('CURRENT_TIMESTAMP')
+    await view().locator('.edit-bar', { hasText: '1 columna modificada · 1 columna nueva' }).waitFor()
+    await shot('17-estructura-editada')
+    await page.keyboard.press('Alt+Enter')
+    const dialog = page.getByRole('dialog', { name: 'Revisar cambios de estructura' })
+    // La intercalación por defecto depende de la versión del servidor; se conserva al cambiar el tipo.
+    expect(await dialog.locator('.review-sql').innerText()).toMatch(
+      new RegExp(
+        `^ALTER TABLE \`${DB}\`\\.\`eventos\`\\n` +
+          '  CHANGE COLUMN `descripcion` `texto` varchar\\(80\\) COLLATE \\w+ NULL,\\n' +
+          '  ADD COLUMN `creado` datetime NULL DEFAULT CURRENT_TIMESTAMP;$'
+      )
+    )
+    await shot('18-estructura-sql')
+    await dialog.getByRole('button', { name: 'Aplicar' }).click()
+    await view().locator('.table-footer', { hasText: 'Estructura modificada: 1 sentencia aplicada' }).waitFor()
+    await expect.poll(async () => view().locator('.edit-bar').count()).toBe(0)
+    const [columns] = await admin.query(
+      `SELECT COLUMN_NAME AS c, COLUMN_TYPE AS t FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${DB}' AND TABLE_NAME = 'eventos' ORDER BY ORDINAL_POSITION`
+    )
+    expect(columns).toEqual([
+      { c: 'id', t: 'int(11)' },
+      { c: 'texto', t: 'varchar(80)' },
+      { c: 'creado', t: 'datetime' }
+    ])
+    await page.locator('.tree-row', { hasText: 'texto' }).waitFor()
+    expect(await page.locator('.tree-row', { hasText: 'descripcion' }).count()).toBe(0)
+    await view().getByRole('tab', { name: 'Datos' }).click()
+    await view().locator('.grid-header .grid-cell', { hasText: 'texto' }).waitFor()
+  })
+
+  it('borrar columnas y añadir índices queda pendiente hasta aplicar; «Descartar» lo deshace todo', async () => {
+    await tab('clientes').click()
+    await view().getByRole('tab', { name: 'Estructura' }).click()
+    await view().getByRole('button', { name: 'Borrar pais' }).click()
+    await view().getByRole('button', { name: '+ Añadir índice' }).click()
+    await page.keyboard.type('uq_email')
+    await view().getByLabel('Columnas de uq_email').fill('email, nombre')
+    await view().getByLabel('Índice único: uq_email').check()
+    await view().locator('.edit-bar', { hasText: '1 columna para borrar · 1 índice' }).waitFor()
+    expect(await view().locator('tr.row-dropped').count()).toBe(1)
+    await shot('19-estructura-borrado-indice')
+    await view().getByRole('button', { name: 'Restaurar pais' }).waitFor()
+    await view().locator('.edit-bar').getByRole('button', { name: 'Descartar' }).click()
+    await expect.poll(async () => view().locator('.edit-bar').count()).toBe(0)
+    expect(await view().locator('tr.row-dropped, tr.row-added').count()).toBe(0)
+    const [columns] = await admin.query(`SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${DB}' AND TABLE_NAME = 'clientes'`)
+    expect(columns).toEqual([{ n: 4 }])
+    await view().getByRole('tab', { name: 'Datos' }).click()
+  })
+
   it('cierra la pestaña activa con Ctrl+W', async () => {
     const before = await page.locator('.tab').count()
     await page.keyboard.press('Control+w')

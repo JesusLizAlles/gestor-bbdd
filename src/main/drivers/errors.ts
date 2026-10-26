@@ -28,3 +28,13 @@ export function friendlyDbError(err: unknown, target: string): Error {
   }
   return err instanceof Error ? err : new Error(message)
 }
+
+/** Fallo al aplicar cambios de estructura; `applied` = sentencias que ya se habían aplicado. */
+export class DdlError extends Error {
+  constructor(
+    message: string,
+    readonly applied: number
+  ) {
+    super(message)
+  }
+}

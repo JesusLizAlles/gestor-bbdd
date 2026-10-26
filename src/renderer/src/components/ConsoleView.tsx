@@ -4,6 +4,7 @@ import type { ConnectionSummary, ConsoleState, QueryResult } from '@shared/types
 import { DEFAULT_MAX_ROWS } from '@shared/types'
 import { setCompletionSource, type CompletionSource } from '../lib/monaco'
 import { isMac, keys } from '../lib/platform'
+import { onSchemaChanged } from '../lib/schema-events'
 import { ConfirmDialog } from './ConfirmDialog'
 import { QueryHistoryPanel } from './QueryHistoryPanel'
 import { ResultsPanel } from './ResultsPanel'
@@ -182,6 +183,17 @@ export function ConsoleView({ tab, active, sqlRequest }: Props) {
       cancelled = true
     }
   }, [active, sessionId, database, engine, schemaVersion])
+
+  // Cambios hechos desde el editor de estructura de una tabla.
+  useEffect(
+    () =>
+      onSchemaChanged((change) => {
+        if (change.sessionId !== sessionId) return
+        completionCache.delete(`${sessionId}|${change.database}`)
+        if (change.database === database) setSchemaVersion((v) => v + 1)
+      }),
+    [sessionId, database]
+  )
 
   const execute = async (text: string, confirmedWrite = false) => {
     if (!text.trim() || running) return

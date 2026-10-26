@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type {
+  AlterTableInput,
+  AlterTableOutput,
   CellChange,
   ColumnInfo,
   CompletionColumn,
@@ -35,7 +37,9 @@ import {
   validateWhere,
   type ParamStatement
 } from '@shared/table-query'
+import { buildAlterStatements, structureSignature } from '@shared/table-ddl'
 import type { DriverFactory } from './drivers'
+import { DdlError } from './drivers/errors'
 import type { DbDriver } from './drivers/types'
 import type { KnownHosts } from './ssh/known-hosts'
 import type { HistoryStore } from './store/history'
@@ -55,6 +59,9 @@ interface Session {
   /** Columnas por tabla, para validar el orden y paginar por clave primaria. */
   columns: Map<string, ColumnInfo[]>
 }
+
+const changedError = (): Error =>
+  new Error('La estructura de la tabla ha cambiado desde que la cargaste. Recárgala y vuelve a hacer los cambios.')
 
 const refKey = (ref: TableRef): string => `${ref.database}\u0000${ref.schema ?? ''}\u0000${ref.table}`
 
@@ -311,6 +318,33 @@ export class SessionManager {
     ]
     await this.exclusive(session, () => session.driver.executeChanges(statements))
     return { updated: updates.length, inserted: inserts.length, deleted: deletes.length }
+  }
+
+  /**
+   * Aplica el editor de estructura. Si la tabla ha cambiado desde que se cargó, no se toca nada; si
+   * no, el SQL se vuelve a generar aquí y solo se ejecuta si es exactamente el que vio el usuario.
+   */
+  async alterTable(sessionId: string, input: AlterTableInput): Promise<AlterTableOutput> {
+    const session = this.get(sessionId)
+    const { engine, readOnly, environment } = session.config
+    if (readOnly) throw new Error('Conexión de solo lectura: no se puede modificar la estructura')
+    if (environment === 'prod' && !input.confirmedWrite) throw new Error('Hay que confirmar los cambios en producción')
+    const ref: TableRef = { database: input.database, schema: input.schema, table: input.table }
+    const structure = await this.tableStructure(sessionId, ref)
+    if (structure.columns.length === 0) throw new Error(`La tabla ${ref.table} no existe o no tienes permisos`)
+    if (structureSignature(structure) !== input.base) throw changedError()
+    const statements = buildAlterStatements(engine, ref, structure, input.design)
+    if (statements.join('\n;\n') !== input.expected.join('\n;\n')) throw new Error('El SQL no coincide con el revisado; vuelve a revisarlo')
+    const total = statements.length
+    if (total === 0) return { executed: 0, total }
+    try {
+      return { executed: await this.exclusive(session, () => session.driver.executeDdl(statements)), total }
+    } catch (err) {
+      return { executed: err instanceof DdlError ? err.applied : 0, total, error: (err as Error).message }
+    } finally {
+      // Columnas cacheadas para paginar y guardar: tras un ALTER pueden ser otras.
+      session.columns.delete(refKey(ref))
+    }
   }
 
   async tableStructure(sessionId: string, ref: TableRef): Promise<TableStructure> {

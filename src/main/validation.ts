@@ -106,6 +106,34 @@ export const rowChangesSchema = z.object({
   confirmedWrite: z.boolean().optional()
 })
 
+const sqlText = z.string().max(4000)
+export const alterTableSchema = z.object({
+  ...tableRef,
+  design: z.object({
+    columns: z
+      .array(
+        z.object({
+          original: identifierSchema.nullable(),
+          name: z.string().max(256),
+          dataType: sqlText,
+          nullable: z.boolean(),
+          defaultValue: sqlText.nullable(),
+          autoIncrement: z.boolean(),
+          primaryKey: z.boolean(),
+          comment: z.string().max(4096).nullable()
+        })
+      )
+      .max(4096),
+    indexes: z
+      .array(z.object({ original: identifierSchema.nullable(), name: z.string().max(256), columns: z.array(z.string().max(256)).max(64), unique: z.boolean() }))
+      .max(1000),
+    dropForeignKeys: z.array(identifierSchema).max(1000)
+  }),
+  base: z.string().max(20_000_000),
+  expected: z.array(z.string().max(1_000_000)).max(10_000),
+  confirmedWrite: z.boolean().optional()
+})
+
 export const historyKindSchema = z.enum(['queries', 'filters'])
 export const historySearchSchema = z.string().max(1000).optional()
 

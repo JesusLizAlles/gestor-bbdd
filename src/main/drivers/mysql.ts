@@ -11,7 +11,7 @@ import type {
 } from '@shared/types'
 import type { ParamStatement } from '@shared/table-query'
 import { groupBy } from './group'
-import { friendlyDbError } from './errors'
+import { DdlError, friendlyDbError } from './errors'
 import type { DbDriver, DriverConnectOptions, ExecuteOptions } from './types'
 import { normalizeValue } from './values'
 
@@ -49,6 +49,21 @@ function sqlTypeName(field: FieldPacket): string {
 
 const quoteIdent = (name: string): string => `\`${name.replace(/`/g, '``')}\``
 
+const NUMERIC_TYPE = /^(tinyint|smallint|mediumint|int|integer|bigint|decimal|numeric|float|double|real)\b/i
+
+/**
+ * COLUMN_DEFAULT como expresión SQL lista para un DEFAULT. MariaDB (10.2.7+) ya la da así (con
+ * 'NULL' para «por defecto nulo»); MySQL da el literal sin comillas y marca las expresiones con
+ * DEFAULT_GENERATED en EXTRA.
+ */
+export function mysqlDefault(def: string | null, extra: string, type: string, mariadb: boolean): string | null {
+  if (def === null) return null
+  if (mariadb) return def.toUpperCase() === 'NULL' ? null : def
+  if (/DEFAULT_GENERATED/i.test(extra)) return /^current_timestamp(\(\d*\))?$/i.test(def) ? def : `(${def})`
+  if (/^b'[01]*'$/.test(def) || (NUMERIC_TYPE.test(type) && /^-?\d+(\.\d+)?$/.test(def))) return def
+  return `'${def.replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
+}
+
 export function rowChangedError(label: string, affected: number): Error {
   return new Error(
     affected === 0
@@ -66,6 +81,7 @@ export class MysqlDriver implements DbDriver {
   private query: Connection | null = null
   private meta: Connection | null = null
   private selectLimit: number | null = null
+  private mariadb = false
   private readonly target: string
 
   constructor(private readonly opts: DriverConnectOptions) {
@@ -87,6 +103,7 @@ export class MysqlDriver implements DbDriver {
     }
     const [row] = await this.metaRows<{ version: string; db: string | null }>('SELECT VERSION() AS version, DATABASE() AS db')
     const version = row?.version ?? ''
+    this.mariadb = /mariadb/i.test(version)
     return {
       product: /mariadb/i.test(version) ? 'MariaDB' : 'MySQL',
       version: version.replace(/-MariaDB.*$/i, ''),
@@ -108,20 +125,28 @@ export class MysqlDriver implements DbDriver {
   }
 
   async listColumns(database: string, table: string): Promise<ColumnInfo[]> {
-    const rows = await this.metaRows<{ name: string; type: string; nullable: string; ckey: string; def: string | null; extra: string }>(
-      `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, IS_NULLABLE AS nullable, COLUMN_KEY AS ckey, COLUMN_DEFAULT AS def,
-              EXTRA AS extra
-         FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`,
+    // SELECT *: GENERATION_EXPRESSION no existe en servidores antiguos y así no falla la consulta.
+    const rows = await this.metaRows<Record<string, string | null>>(
+      'SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION',
       [database, table]
     )
-    return rows.map((r) => ({
-      name: r.name,
-      dataType: String(r.type),
-      nullable: r.nullable === 'YES',
-      isPrimaryKey: r.ckey === 'PRI',
-      defaultValue: r.def === null ? null : String(r.def),
-      autoIncrement: /auto_increment/i.test(r.extra ?? '')
-    }))
+    return rows.map((r) => {
+      const extra = String(r.EXTRA ?? '')
+      const type = String(r.COLUMN_TYPE)
+      const generated = /\b(VIRTUAL|STORED|PERSISTENT) GENERATED\b/i.exec(extra)
+      return {
+        name: String(r.COLUMN_NAME),
+        dataType: type,
+        nullable: r.IS_NULLABLE === 'YES',
+        isPrimaryKey: r.COLUMN_KEY === 'PRI',
+        defaultValue: generated ? null : mysqlDefault(r.COLUMN_DEFAULT ?? null, extra, type, this.mariadb),
+        autoIncrement: /auto_increment/i.test(extra),
+        comment: r.COLUMN_COMMENT ? String(r.COLUMN_COMMENT) : null,
+        collation: r.COLLATION_NAME ? String(r.COLLATION_NAME) : null,
+        onUpdate: /\bon update (\w+(?:\(\d*\))?)/i.exec(extra)?.[1] ?? null,
+        generated: generated && r.GENERATION_EXPRESSION ? { expression: String(r.GENERATION_EXPRESSION), stored: !/VIRTUAL/i.test(generated[1]!) } : null
+      }
+    })
   }
 
   async completionColumns(database: string): Promise<CompletionColumn[]> {
@@ -243,6 +268,19 @@ export class MysqlDriver implements DbDriver {
       await this.run(conn, 'ROLLBACK').catch(() => {})
       throw err
     }
+  }
+
+  /** MySQL no deshace el DDL: si una sentencia falla, las anteriores quedan aplicadas. */
+  async executeDdl(statements: string[]): Promise<number> {
+    const conn = this.requireQuery()
+    for (const [i, st] of statements.entries()) {
+      try {
+        await this.run(conn, st)
+      } catch (err) {
+        throw new DdlError((err as Error).message, i)
+      }
+    }
+    return statements.length
   }
 
   async cancel(): Promise<void> {

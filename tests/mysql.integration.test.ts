@@ -9,6 +9,8 @@ import type { Server as SshServer } from 'ssh2'
 import { utils } from 'ssh2'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { equalsCondition } from '../src/shared/table-query'
+import { buildAlterStatements, designFromStructure, renameColumn, structureSignature } from '../src/shared/table-ddl'
+import type { TableDesign, TableRef } from '../src/shared/types'
 import { createDriver } from '../src/main/drivers'
 import { MysqlDriver } from '../src/main/drivers/mysql'
 import { SessionManager } from '../src/main/sessions'
@@ -479,6 +481,127 @@ describe.skipIf(!enabled)('MySQL/MariaDB (integración)', () => {
           sessions.saveRowChanges(ro.sessionId, { ...editable, updates: [{ key: [{ column: 'id', value: 1 }], set: [{ column: 'nota', value: 'x' }] }] })
         ).rejects.toThrow(/solo lectura/)
       } finally {
+        await sessions.close(ro.sessionId)
+      }
+    })
+  })
+
+  describe('editor de estructura', () => {
+    const estructura: TableRef = { database: DB, schema: null, table: 'estructura' }
+    const load = () => sessions.tableStructure(sessionId, estructura)
+    /** Lo que hace la interfaz: diseño a partir de la estructura, cambios, vista previa y aplicar. */
+    const alter = async (change: (d: TableDesign) => TableDesign | void, id = sessionId, extra = {}) => {
+      const structure = await load()
+      let design = designFromStructure(structure)
+      design = change(design) ?? design
+      const expected = buildAlterStatements('mysql', estructura, structure, design)
+      return { expected, out: await sessions.alterTable(id, { ...estructura, design, base: structureSignature(structure), expected, ...extra }) }
+    }
+
+    beforeAll(async () => {
+      await run(`
+        CREATE TABLE estructura (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          nombre VARCHAR(40) COLLATE utf8mb4_spanish_ci NOT NULL COMMENT 'Nombre del cliente',
+          estado VARCHAR(10) NOT NULL DEFAULT 'nuevo',
+          modificado TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          doble INT AS (id * 2) VIRTUAL,
+          nota TEXT NULL,
+          KEY idx_estado (estado)
+        );
+        INSERT INTO estructura (nombre) VALUES ('uno'), ('dos');
+        CREATE TABLE estructura_hija (id INT PRIMARY KEY, padre INT, CONSTRAINT fk_padre FOREIGN KEY (padre) REFERENCES estructura (id));
+      `)
+    })
+
+    it('lee valores por defecto, comentarios, intercalación, ON UPDATE y columnas calculadas', async () => {
+      const { columns } = await load()
+      const byName = Object.fromEntries(columns.map((c) => [c.name, c]))
+      expect(byName.nombre).toMatchObject({ comment: 'Nombre del cliente', collation: 'utf8mb4_spanish_ci', defaultValue: null })
+      expect(byName.estado).toMatchObject({ defaultValue: "'nuevo'" })
+      expect(byName.modificado!.defaultValue).toMatch(/^current_timestamp/i)
+      expect(byName.modificado!.onUpdate).toMatch(/^current_timestamp/i)
+      expect(byName.doble!.generated).toMatchObject({ stored: false })
+      expect(byName.nota!.defaultValue).toBeNull()
+      expect(buildAlterStatements('mysql', estructura, await load(), designFromStructure(await load()))).toEqual([])
+    })
+
+    it('renombra, cambia tipos, añade y borra columnas e índices sin perder lo que no se edita', async () => {
+      const { expected, out } = await alter((d) => {
+        d = renameColumn(d, 1, 'nombre_completo')
+        d.columns[1]!.dataType = 'varchar(120)'
+        d.columns[3]!.name = 'actualizado'
+        d.columns[4]!.name = 'doble_id'
+        d.columns.splice(5, 1) // nota
+        d.columns.push({ original: null, name: 'email', dataType: 'varchar(150)', nullable: false, defaultValue: "''", autoIncrement: false, primaryKey: false, comment: 'Correo' })
+        d.indexes.push({ original: null, name: 'uq_email_nombre', columns: ['email', 'nombre_completo'], unique: true })
+        d.indexes[0]!.unique = false
+        return d
+      })
+      expect(out).toEqual({ executed: expected.length, total: expected.length })
+      const after = await load()
+      const byName = Object.fromEntries(after.columns.map((c) => [c.name, c]))
+      expect(after.columns.map((c) => c.name)).toEqual(['id', 'nombre_completo', 'estado', 'actualizado', 'doble_id', 'email'])
+      expect(byName.nombre_completo).toMatchObject({ dataType: 'varchar(120)', comment: 'Nombre del cliente', collation: 'utf8mb4_spanish_ci', nullable: false })
+      expect(byName.actualizado!.onUpdate).toMatch(/^current_timestamp/i)
+      expect(byName.doble_id!.generated).toMatchObject({ stored: false })
+      expect(byName.email).toMatchObject({ defaultValue: "''", comment: 'Correo', nullable: false })
+      expect(after.indexes.find((i) => i.name === 'uq_email_nombre')).toMatchObject({ columns: ['email', 'nombre_completo'], unique: true })
+      // Los datos siguen ahí y la paginación usa las columnas nuevas.
+      const page = await sessions.fetchTableData(sessionId, { ...estructura, offset: 0, limit: 10, sort: [{ column: 'nombre_completo', direction: 'asc' }] })
+      expect(page.rows.map((r) => r[1])).toEqual(['dos', 'uno'])
+    })
+
+    it('cambia la clave primaria y el valor por defecto', async () => {
+      const { out } = await alter((d) => {
+        d.columns[2]!.defaultValue = "'pendiente'"
+        d.columns[2]!.primaryKey = true
+      })
+      expect(out.error).toBeUndefined()
+      const after = await load()
+      expect(after.indexes.find((i) => i.primary)?.columns).toEqual(['id', 'estado'])
+      expect(after.columns.find((c) => c.name === 'estado')?.defaultValue).toBe("'pendiente'")
+    })
+
+    it('si la tabla cambió desde que se cargó, o el SQL no es el revisado, no aplica nada', async () => {
+      const structure = await load()
+      const design = designFromStructure(structure)
+      design.columns[2]!.dataType = 'varchar(30)'
+      const expected = buildAlterStatements('mysql', estructura, structure, design)
+      // Otra persona comenta la columna: aplicar la vista previa vieja borraría su comentario.
+      await run("ALTER TABLE estructura MODIFY estado VARCHAR(20) NOT NULL DEFAULT 'pendiente' COMMENT 'de otra persona'")
+      await expect(sessions.alterTable(sessionId, { ...estructura, design, base: structureSignature(structure), expected })).rejects.toThrow(/ha cambiado/)
+      // Y tampoco se ejecuta SQL distinto del revisado.
+      const fresh = await load()
+      await expect(sessions.alterTable(sessionId, { ...estructura, design, base: structureSignature(fresh), expected: ['SELECT 1'] })).rejects.toThrow(/no coincide/)
+      expect((await load()).columns.find((c) => c.name === 'estado')).toMatchObject({ dataType: 'varchar(20)', comment: 'de otra persona' })
+    })
+
+    it('si una sentencia falla, dice cuántas se aplicaron (MySQL no deshace el DDL)', async () => {
+      const hija: TableRef = { database: DB, schema: null, table: 'estructura_hija' }
+      const structure = await sessions.tableStructure(sessionId, hija)
+      const design = designFromStructure(structure)
+      design.dropForeignKeys = ['fk_padre']
+      design.columns[1]!.dataType = 'tipo_que_no_existe'
+      const expected = buildAlterStatements('mysql', hija, structure, design)
+      expect(expected).toHaveLength(2)
+      const out = await sessions.alterTable(sessionId, { ...hija, design, base: structureSignature(structure), expected })
+      expect(out).toMatchObject({ executed: 1, total: 2 })
+      expect(out.error).toMatch(/tipo_que_no_existe|syntax/i)
+      expect((await sessions.tableStructure(sessionId, hija)).foreignKeys).toEqual([])
+    })
+
+    it('producción exige confirmar y solo lectura no deja modificar', async () => {
+      const prod = await sessions.open({ ...config, id: 'prod-alter', environment: 'prod' }, { password })
+      const ro = await sessions.open({ ...config, id: 'ro-alter', readOnly: true }, { password })
+      try {
+        await expect(alter((d) => void (d.columns[0]!.comment = 'clave'), prod.sessionId)).rejects.toThrow(/confirmar/)
+        await expect(alter((d) => void (d.columns[0]!.comment = 'clave'), ro.sessionId)).rejects.toThrow(/solo lectura/)
+        const { out } = await alter((d) => void (d.columns[0]!.comment = 'clave'), prod.sessionId, { confirmedWrite: true })
+        expect(out.error).toBeUndefined()
+        expect((await load()).columns[0]!.comment).toBe('clave')
+      } finally {
+        await sessions.close(prod.sessionId)
         await sessions.close(ro.sessionId)
       }
     })

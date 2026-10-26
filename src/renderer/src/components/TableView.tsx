@@ -16,11 +16,13 @@ import type {
 } from '@shared/types'
 import { PAGE_SIZES } from '@shared/types'
 import { isAddRowKey, keys } from '../lib/platform'
+import { notifySchemaChanged } from '../lib/schema-events'
 import { ConfirmDialog } from './ConfirmDialog'
 import { DataGrid, type FocusRequest, type PendingEdits } from './DataGrid'
 import { FilterInput } from './FilterInput'
 import { Icon } from './Icon'
 import { Pager } from './Pager'
+import { StructureView, type Loadable } from './StructureView'
 
 export interface OpenTable {
   type: 'table'
@@ -40,8 +42,6 @@ interface Props {
   /** Abre una consola sobre esta base de datos con una consulta de partida. */
   onOpenConsole: (database: string, sql: string) => void
 }
-
-type Loadable<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string }
 
 function readPageSize(): number {
   try {
@@ -95,6 +95,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmPreview, setConfirmPreview] = useState<string[] | null>(null)
+  const structureDirty = useRef(false)
 
   // Datos de la página actual. Solo cuenta la respuesta de la última petición.
   useEffect(() => {
@@ -147,6 +148,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
 
   const refresh = useCallback(() => {
     if (!discardPending()) return
+    if (structureDirty.current && !window.confirm('Hay cambios de estructura sin aplicar. ¿Descartarlos?')) return
     setTotal(null)
     setReload((n) => n + 1)
     loadStructure()
@@ -239,6 +241,8 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         : ready && pkColumns.length === 0
           ? 'Sin clave primaria: solo lectura'
           : null
+  const structureReadOnly =
+    tab.kind === 'view' ? 'Vista: la estructura no se edita' : connection.readOnly ? 'Conexión de solo lectura' : null
   const editable =
     !readOnlyReason && ready !== null && page !== null && pkColumns.every((pk) => page.columns.some((c) => c.name === pk))
 
@@ -622,7 +626,30 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         </div>
       )}
 
-      {view === 'structure' && <StructureView structure={structure} engine={engine} onOpen={(r) => onNavigate(r, '')} />}
+      <StructureView
+        structure={structure}
+        engine={engine}
+        tableRef={ref}
+        hidden={view !== 'structure'}
+        readOnlyReason={structureReadOnly}
+        prod={connection.environment === 'prod'}
+        onOpen={(r) => onNavigate(r, '')}
+        onApply={(design, base, expected) =>
+          window.api.alterTable(sessionId, { ...ref, design, base, expected, confirmedWrite: connection.environment === 'prod' })
+        }
+        onApplied={(message) => {
+          notifySchemaChanged({ sessionId, database: ref.database })
+          setNotice(message)
+          setChanges(NO_CHANGES)
+          setTotal(null)
+          setReload((n) => n + 1)
+          loadStructure()
+        }}
+        onOpenConsole={(sql) => onOpenConsole(ref.database, sql)}
+        onDirtyChange={(dirty) => {
+          structureDirty.current = dirty
+        }}
+      />
 
       {confirmPreview && (
         <ConfirmDialog
@@ -651,6 +678,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         )}
         {where && view === 'data' && <span className="filter-chip">Filtrado</span>}
         {view === 'data' && readOnlyReason && <span>{readOnlyReason}</span>}
+        {view === 'structure' && <span>{structureReadOnly ?? keys('Edita las celdas y revisa el SQL antes de aplicarlo · Alt+Enter: revisar')}</span>}
         {view === 'data' && editable && <span>{keys('Enter: editar · Arrastrar: seleccionar · Ctrl+C/V: copiar y pegar · Alt+Insert: fila nueva · Ctrl+Supr: borrar')}</span>}
         {sort[0] && view === 'data' && (
           <span>
@@ -660,126 +688,6 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         <span className="spacer" />
         {notice && <span>{notice}</span>}
       </div>
-    </div>
-  )
-}
-
-function StructureView({
-  structure,
-  engine,
-  onOpen
-}: {
-  structure: Loadable<TableStructure>
-  engine: 'mysql' | 'mssql'
-  onOpen: (ref: TableRef) => void
-}) {
-  const [copied, setCopied] = useState(false)
-  if (structure.state === 'loading') return <div className="grid-empty">Cargando estructura…</div>
-  if (structure.state === 'error') return <div className="result-message error">{structure.message}</div>
-  const { columns, indexes, foreignKeys, ddl } = structure.value
-  return (
-    <div className="structure">
-      <h3>Columnas ({columns.length})</h3>
-      <table className="info-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Nombre</th>
-            <th>Tipo</th>
-            <th>Nulo</th>
-            <th>Por defecto</th>
-          </tr>
-        </thead>
-        <tbody>
-          {columns.map((c, i) => (
-            <tr key={c.name}>
-              <td className="dim">{i + 1}</td>
-              <td>
-                {c.isPrimaryKey && <span className="pk-mark">🔑</span>}
-                {c.name}
-              </td>
-              <td className="mono">{c.dataType}</td>
-              <td>{c.nullable ? 'sí' : 'no'}</td>
-              <td className="mono">{c.defaultValue ?? <span className="dim">—</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <h3>Índices ({indexes.length})</h3>
-      {indexes.length === 0 ? (
-        <p className="dim">Sin índices.</p>
-      ) : (
-        <table className="info-table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Columnas</th>
-              <th>Tipo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {indexes.map((ix) => (
-              <tr key={ix.name}>
-                <td>{ix.name}</td>
-                <td className="mono">{ix.columns.join(', ')}</td>
-                <td>{ix.primary ? 'Clave primaria' : ix.unique ? 'Único' : 'Índice'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Claves foráneas ({foreignKeys.length})</h3>
-      {foreignKeys.length === 0 ? (
-        <p className="dim">Sin claves foráneas.</p>
-      ) : (
-        <table className="info-table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Columnas</th>
-              <th>Referencia</th>
-            </tr>
-          </thead>
-          <tbody>
-            {foreignKeys.map((fk) => (
-              <tr key={fk.name}>
-                <td>{fk.name}</td>
-                <td className="mono">{fk.columns.join(', ')}</td>
-                <td>
-                  <button
-                    className="link"
-                    title="Abrir la tabla referenciada"
-                    onClick={() => onOpen({ database: fk.refDatabase, schema: fk.refSchema, table: fk.refTable })}
-                  >
-                    {engine === 'mysql' ? `${fk.refDatabase}.${fk.refTable}` : `${fk.refSchema}.${fk.refTable}`}
-                  </button>{' '}
-                  <span className="mono dim">({fk.refColumns.join(', ')})</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {ddl && (
-        <>
-          <h3>
-            DDL{' '}
-            <button
-              className="link"
-              onClick={() => {
-                void navigator.clipboard.writeText(ddl)
-                setCopied(true)
-              }}
-            >
-              {copied ? 'copiado' : 'copiar'}
-            </button>
-          </h3>
-          <pre className="ddl">{ddl}</pre>
-        </>
-      )}
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ColumnInfo, Engine, SessionInfo, TableInfo } from '@shared/types'
+import { onSchemaChanged } from '../lib/schema-events'
 import { DatabasePicker } from './DatabasePicker'
 
 interface Props {
@@ -101,6 +102,22 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
       setColumns((c) => ({ ...c, [key]: { state: 'error', message: (err as Error).message } }))
     }
   }
+
+  // Tras cambiar la estructura de una tabla, las columnas de esa base de datos se vuelven a leer.
+  const latest = useRef({ tables, expanded, loadColumns })
+  latest.current = { tables, expanded, loadColumns }
+  useEffect(
+    () =>
+      onSchemaChanged(({ sessionId, database }) => {
+        if (sessionId !== session.sessionId) return
+        setColumns((c) => Object.fromEntries(Object.entries(c).filter(([key]) => !key.startsWith(`${database}\u0000`))))
+        const { tables, expanded, loadColumns } = latest.current
+        const list = tables[database]
+        if (list?.state !== 'ready') return
+        for (const t of list.value) if (expanded.has(tableKey(database, t))) void loadColumns(database, t)
+      }),
+    [session.sessionId]
+  )
 
   const toggle = (key: string, onOpen?: () => void) => {
     const opening = !expanded.has(key)

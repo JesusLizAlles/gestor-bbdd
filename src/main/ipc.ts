@@ -13,6 +13,7 @@ import type { Updater } from './updater'
 import type { ConnectionStore } from './store/connections'
 import type { SecretVault } from './store/secrets'
 import {
+  alterTableSchema,
   consoleStateSchema,
   countSchema,
   exportConfigSchema,
@@ -101,6 +102,7 @@ export function registerIpc({ store, vault, sessions, history, consoles, updater
     countTableRows: (id, input) => sessions.countTableRows(idSchema.parse(id), countSchema.parse(input)),
     tableStructure: (id, ref) => sessions.tableStructure(idSchema.parse(id), tableRefSchema.parse(ref)),
     saveRowChanges: (id, input) => sessions.saveRowChanges(idSchema.parse(id), rowChangesSchema.parse(input)),
+    alterTable: (id, input) => sessions.alterTable(idSchema.parse(id), alterTableSchema.parse(input)),
     runQuery: (id, input) => sessions.run(idSchema.parse(id), runQuerySchema.parse(input)),
     queryHistory: (id, search) => history.listQueries(idSchema.parse(id), historySearchSchema.parse(search)),
     filterHistory: (id, ref) => history.listFilters(idSchema.parse(id), tableRefSchema.parse(ref)),

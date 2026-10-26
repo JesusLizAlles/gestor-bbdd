@@ -12,7 +12,8 @@ import type {
 } from '@shared/types'
 import type { ParamStatement } from '@shared/table-query'
 import { groupBy } from './group'
-import { friendlyDbError } from './errors'
+import { unwrapParens } from '@shared/table-ddl'
+import { DdlError, friendlyDbError } from './errors'
 import type { DbDriver, DriverConnectOptions, ExecuteOptions } from './types'
 import { normalizeValue } from './values'
 
@@ -72,12 +73,25 @@ export class MssqlDriver implements DbDriver {
 
   async listColumns(database: string, table: string, schema: string | null): Promise<ColumnInfo[]> {
     const db = quoteIdent(database)
-    const rows = await this.metaRows<{ name: string; dataType: string; nullable: string; def: string | null; pk: number; ident: number | null }>(
+    type Row = {
+      name: string
+      dataType: string
+      nullable: string
+      def: string | null
+      pk: number
+      ident: number | null
+      collation: string | null
+      defName: string | null
+      computed: string | null
+      persisted: boolean | null
+    }
+    const rows = await this.metaRows<Row>(
       `SELECT c.COLUMN_NAME AS name,
               c.DATA_TYPE + CASE
                 WHEN c.CHARACTER_MAXIMUM_LENGTH = -1 THEN '(max)'
                 WHEN c.CHARACTER_MAXIMUM_LENGTH IS NOT NULL THEN '(' + CAST(c.CHARACTER_MAXIMUM_LENGTH AS varchar(10)) + ')'
                 WHEN c.DATA_TYPE IN ('decimal', 'numeric') THEN '(' + CAST(c.NUMERIC_PRECISION AS varchar(10)) + ',' + CAST(c.NUMERIC_SCALE AS varchar(10)) + ')'
+                WHEN c.DATA_TYPE IN ('datetime2', 'time', 'datetimeoffset') THEN '(' + CAST(c.DATETIME_PRECISION AS varchar(10)) + ')'
                 ELSE '' END AS dataType,
               c.IS_NULLABLE AS nullable,
               c.COLUMN_DEFAULT AS def,
@@ -88,20 +102,30 @@ export class MssqlDriver implements DbDriver {
                  WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = c.TABLE_SCHEMA
                    AND tc.TABLE_NAME = c.TABLE_NAME AND k.COLUMN_NAME = c.COLUMN_NAME
               ) THEN 1 ELSE 0 END AS pk,
-              COLUMNPROPERTY(OBJECT_ID(QUOTENAME(c.TABLE_CATALOG) + '.' + QUOTENAME(c.TABLE_SCHEMA) + '.' + QUOTENAME(c.TABLE_NAME)),
-                             c.COLUMN_NAME, 'IsIdentity') AS ident
+              COLUMNPROPERTY(OBJECT_ID(@obj), c.COLUMN_NAME, 'IsIdentity') AS ident,
+              c.COLLATION_NAME AS collation,
+              dc.name AS defName,
+              cc.definition AS computed,
+              cc.is_persisted AS persisted
          FROM ${db}.INFORMATION_SCHEMA.COLUMNS c
+         LEFT JOIN ${db}.sys.columns sc ON sc.object_id = OBJECT_ID(@obj) AND sc.name = c.COLUMN_NAME
+         LEFT JOIN ${db}.sys.default_constraints dc ON dc.object_id = sc.default_object_id
+         LEFT JOIN ${db}.sys.computed_columns cc ON cc.object_id = sc.object_id AND cc.column_id = sc.column_id
         WHERE c.TABLE_SCHEMA = @schema AND c.TABLE_NAME = @table
         ORDER BY c.ORDINAL_POSITION`,
-      { schema: schema ?? 'dbo', table }
+      { schema: schema ?? 'dbo', table, obj: objectName(database, schema, table) }
     )
     return rows.map((r) => ({
       name: r.name,
       dataType: r.dataType,
       nullable: r.nullable === 'YES',
       isPrimaryKey: r.pk === 1,
-      defaultValue: r.def,
-      autoIncrement: r.ident === 1
+      // Se guarda como ((0)) o (getdate()): se enseña y se edita sin los paréntesis de fuera.
+      defaultValue: r.def === null ? null : unwrapParens(r.def),
+      autoIncrement: r.ident === 1,
+      collation: r.collation,
+      defaultConstraint: r.defName,
+      generated: r.computed === null ? null : { expression: unwrapParens(r.computed), stored: Boolean(r.persisted) }
     }))
   }
 
@@ -115,8 +139,8 @@ export class MssqlDriver implements DbDriver {
 
   async listIndexes({ database, schema, table }: TableRef): Promise<IndexInfo[]> {
     const db = quoteIdent(database)
-    const rows = await this.metaRows<{ name: string; uq: boolean; pk: boolean; col: string }>(
-      `SELECT i.name AS name, i.is_unique AS uq, i.is_primary_key AS pk, c.name AS col
+    const rows = await this.metaRows<{ name: string; uq: boolean; pk: boolean; uc: boolean; col: string }>(
+      `SELECT i.name AS name, i.is_unique AS uq, i.is_primary_key AS pk, i.is_unique_constraint AS uc, c.name AS col
          FROM ${db}.sys.indexes i
          JOIN ${db}.sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
          JOIN ${db}.sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
@@ -128,7 +152,8 @@ export class MssqlDriver implements DbDriver {
       name,
       columns: cols.map((c) => c.col),
       unique: Boolean(cols[0]!.uq),
-      primary: Boolean(cols[0]!.pk)
+      primary: Boolean(cols[0]!.pk),
+      uniqueConstraint: Boolean(cols[0]!.uc)
     }))
   }
 
@@ -235,6 +260,26 @@ export class MssqlDriver implements DbDriver {
       })
       .join('\n')
     await request.query(`SET XACT_ABORT ON;\nBEGIN TRANSACTION;\n${body}\nCOMMIT TRANSACTION;`)
+  }
+
+  /** En una transacción: si una sentencia falla, no queda nada aplicado. */
+  async executeDdl(statements: string[]): Promise<number> {
+    const tx = new sql.Transaction(this.requireQuery())
+    await tx.begin()
+    try {
+      for (const [i, st] of statements.entries()) {
+        try {
+          await new sql.Request(tx).batch(st)
+        } catch (err) {
+          throw new Error(`Sentencia ${i + 1} de ${statements.length}: ${(err as Error).message}`)
+        }
+      }
+      await tx.commit()
+    } catch (err) {
+      await tx.rollback().catch(() => {})
+      throw new DdlError((err as Error).message, 0)
+    }
+    return statements.length
   }
 
   async cancel(): Promise<void> {
