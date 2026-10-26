@@ -278,6 +278,16 @@ export interface UpdateState {
   manualInstall?: boolean
 }
 
+/** Lo escrito en una consola, para dejarla tal cual al volver a abrirla (también tras reiniciar). */
+export interface ConsoleState {
+  text: string
+  /** Base de datos elegida en la barra de la consola. */
+  database: string | null
+  /** Selección, o cursor si está vacía; líneas y columnas de Monaco (empiezan en 1). */
+  selection: { startLine: number; startColumn: number; endLine: number; endColumn: number }
+  scrollTop: number
+}
+
 export interface ExportInput {
   defaultName: string
   format: 'csv' | 'json' | 'sql'
@@ -318,6 +328,9 @@ export interface DbApi {
   installUpdate(): Promise<void>
   /** Suscripción a los cambios de estado del actualizador; devuelve la función para darse de baja. */
   onUpdateState(listener: (state: UpdateState) => void): () => void
+  /** Consola guardada de una conexión y base de datos (null = sin base de datos); null si no hay. */
+  loadConsole(connectionId: string, database: string | null): Promise<ConsoleState | null>
+  saveConsole(connectionId: string, database: string | null, state: ConsoleState): Promise<void>
   exportFile(input: ExportInput): Promise<string | null>
   pickFile(title: string): Promise<string | null>
 }

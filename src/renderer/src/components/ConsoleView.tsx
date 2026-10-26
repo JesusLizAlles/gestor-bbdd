@@ -1,28 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { splitStatements, statementAt } from '@shared/sql'
-import type { ConnectionSummary, QueryResult } from '@shared/types'
+import type { ConnectionSummary, ConsoleState, QueryResult } from '@shared/types'
 import { DEFAULT_MAX_ROWS } from '@shared/types'
 import { setCompletionSource, type CompletionSource } from '../lib/monaco'
 import { isMac, keys } from '../lib/platform'
 import { ConfirmDialog } from './ConfirmDialog'
 import { QueryHistoryPanel } from './QueryHistoryPanel'
 import { ResultsPanel } from './ResultsPanel'
-import { SqlEditor, type EditorCommands, type SqlEditorHandle } from './SqlEditor'
+import { SqlEditor, type EditorCommands, type EditorState, type SqlEditorHandle } from './SqlEditor'
 
+/** Consola de una conexión y base de datos: hay una por pareja y lo escrito se guarda. */
 export interface OpenConsole {
   type: 'console'
   id: string
   sessionId: string
   connection: ConnectionSummary
   title: string
-  initialDatabase: string | null
-  initialSql: string
+  /** Base de datos para la que se abrió: identifica la consola guardada. */
+  homeDatabase: string | null
 }
 
 interface Props {
   tab: OpenConsole
   active: boolean
+  /** Sentencia que añadir al final (p. ej. desde el visor de tablas); `nonce` la distingue de la anterior. */
+  sqlRequest: { sql: string; nonce: number } | null
 }
+
+/** Se guarda tras esta pausa al escribir, y en el momento al cerrar la pestaña o la app. */
+const SAVE_DELAY_MS = 500
 
 const ROW_LIMITS = [100, 500, 1000, 5000, 20000]
 
@@ -54,11 +60,13 @@ function loadCompletion(sessionId: string, database: string, engine: CompletionS
 const DDL = /^\s*(CREATE|ALTER|DROP|RENAME|TRUNCATE)\b/i
 
 /** Consola SQL de una conexión, con la base de datos elegida en la barra de herramientas. */
-export function ConsoleView({ tab, active }: Props) {
-  const { sessionId, connection } = tab
+export function ConsoleView({ tab, active, sqlRequest }: Props) {
+  const { sessionId, connection, homeDatabase } = tab
   const engine = connection.engine
   const [databases, setDatabases] = useState<string[]>([])
-  const [database, setDatabase] = useState<string | null>(tab.initialDatabase)
+  const [database, setDatabase] = useState<string | null>(homeDatabase)
+  /** Consola guardada: undefined mientras se lee; null si no había. */
+  const [saved, setSaved] = useState<ConsoleState | null | undefined>(undefined)
   const [results, setResults] = useState<QueryResult[]>([])
   const [running, setRunning] = useState(false)
   const [message, setMessage] = useState<{ kind: 'error' | 'info'; text: string } | null>(null)
@@ -85,6 +93,66 @@ export function ConsoleView({ tab, active }: Props) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [active])
+
+  useEffect(() => {
+    let cancelled = false
+    window.api
+      .loadConsole(connection.id, homeDatabase)
+      .catch(() => null)
+      .then((state) => {
+        if (cancelled) return
+        setSaved(state)
+        if (state) setDatabase(state.database)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [connection.id, homeDatabase])
+
+  // Guardado: el último estado del editor y un temporizador; flush() escribe si hay algo pendiente.
+  const editorState = useRef<EditorState | null>(null)
+  const databaseRef = useRef(database)
+  databaseRef.current = database
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const flush = useRef(() => {})
+  flush.current = () => {
+    if (saveTimer.current === undefined) return
+    clearTimeout(saveTimer.current)
+    saveTimer.current = undefined
+    const state = editorState.current
+    if (state) void window.api.saveConsole(connection.id, homeDatabase, { ...state, database: databaseRef.current }).catch(() => {})
+  }
+  const scheduleSave = () => {
+    clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => flush.current(), SAVE_DELAY_MS)
+  }
+  const onEditorState = (state: EditorState) => {
+    editorState.current = state
+    scheduleSave()
+  }
+
+  // Cambiar de base de datos también se guarda (solo depende de database: scheduleSave usa refs).
+  useEffect(() => {
+    if (saved !== undefined) scheduleSave()
+  }, [database])
+
+  // Al cerrar la pestaña (desmontar) o la app, lo pendiente se guarda ya.
+  useEffect(() => {
+    const onUnload = () => flush.current()
+    window.addEventListener('beforeunload', onUnload)
+    return () => {
+      window.removeEventListener('beforeunload', onUnload)
+      flush.current()
+    }
+  }, [])
+
+  // SQL que llega de fuera: se añade al final, también si la consola ya estaba abierta.
+  const handledRequest = useRef(0)
+  useEffect(() => {
+    if (saved === undefined || !sqlRequest || sqlRequest.nonce === handledRequest.current) return
+    handledRequest.current = sqlRequest.nonce
+    editorRef.current?.appendStatement(sqlRequest.sql)
+  }, [saved, sqlRequest])
 
   useEffect(() => {
     window.api
@@ -237,7 +305,16 @@ export function ConsoleView({ tab, active }: Props) {
       <div className="console-body">
         <div className="workspace">
           <div className="editor-host" style={{ height: editorHeight }}>
-            <SqlEditor ref={editorRef} engine={engine} initialValue={tab.initialSql} commands={commands} />
+            {saved !== undefined && (
+              <SqlEditor
+                ref={editorRef}
+                engine={engine}
+                initialValue={saved?.text ?? ''}
+                initialView={saved ?? undefined}
+                onStateChange={onEditorState}
+                commands={commands}
+              />
+            )}
           </div>
           <div className="splitter" onMouseDown={startResize} />
           <ResultsPanel engine={engine} results={results} running={running} message={message} maxRows={maxRows} />

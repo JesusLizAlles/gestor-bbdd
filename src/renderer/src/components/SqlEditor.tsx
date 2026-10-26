@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
-import type { Engine } from '@shared/types'
+import type { ConsoleState, Engine } from '@shared/types'
 import { languageFor, monaco, registerCompletion } from '../lib/monaco'
 
 export interface EditorCommands {
@@ -8,6 +8,9 @@ export interface EditorCommands {
   /** Script completo. */
   runAll: (text: string) => void
 }
+
+/** Lo que hay en el editor y dónde: lo que se guarda de una consola (sin su base de datos). */
+export type EditorState = Omit<ConsoleState, 'database'>
 
 export interface SqlEditorHandle {
   /** Añade una sentencia al final, separada por una línea en blanco, conservando el deshacer. */
@@ -26,17 +29,20 @@ interface Props {
   engine: Engine
   /** Texto inicial. El editor no es controlado: los cambios externos van por `appendStatement`. */
   initialValue: string
-  onChange?: (value: string) => void
+  /** Selección y desplazamiento con los que se abre (consola recuperada). */
+  initialView?: Pick<EditorState, 'selection' | 'scrollTop'>
+  /** Cada cambio de texto, cursor/selección o desplazamiento, con el estado completo. */
+  onStateChange?: (state: EditorState) => void
   commands: EditorCommands
   ref?: Ref<SqlEditorHandle>
 }
 
 /** Editor Monaco con atajos Ctrl+Enter (sentencia actual) y Ctrl+Shift+Enter (todo). */
-export function SqlEditor({ engine, initialValue, onChange, commands, ref }: Props) {
+export function SqlEditor({ engine, initialValue, initialView, onStateChange, commands, ref }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null)
-  const latest = useRef({ onChange, commands })
-  latest.current = { onChange, commands }
+  const latest = useRef({ onStateChange, commands })
+  latest.current = { onStateChange, commands }
   const runRef = useRef<(all: boolean) => void>(() => {})
 
   useImperativeHandle(ref, () => ({
@@ -120,10 +126,34 @@ export function SqlEditor({ engine, initialValue, onChange, commands, ref }: Pro
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
       run: () => run(true)
     })
-    const sub = instance.onDidChangeModelContent(() => latest.current.onChange?.(instance.getValue()))
+    if (initialView) {
+      const { startLine, startColumn, endLine, endColumn } = initialView.selection
+      instance.setSelection(new monaco.Selection(startLine, startColumn, endLine, endColumn))
+      instance.setScrollTop(initialView.scrollTop)
+    }
+
+    // El texto se lee solo cuando cambia; mover el cursor o desplazarse reutiliza el último.
+    let text = instance.getValue()
+    const emit = () => {
+      const s = instance.getSelection()
+      if (!s) return
+      latest.current.onStateChange?.({
+        text,
+        selection: { startLine: s.startLineNumber, startColumn: s.startColumn, endLine: s.endLineNumber, endColumn: s.endColumn },
+        scrollTop: instance.getScrollTop()
+      })
+    }
+    const subs = [
+      instance.onDidChangeModelContent(() => {
+        text = instance.getValue()
+        emit()
+      }),
+      instance.onDidChangeCursorSelection(emit),
+      instance.onDidScrollChange((e) => e.scrollTopChanged && emit())
+    ]
     instance.focus()
     return () => {
-      sub.dispose()
+      for (const sub of subs) sub.dispose()
       instance.dispose()
       editor.current = null
     }

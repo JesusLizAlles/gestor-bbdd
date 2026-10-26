@@ -56,6 +56,14 @@ export const idSchema = z.string().min(1).max(100)
 export const identifierSchema = z.string().min(1).max(256)
 export const visibleDatabasesSchema = z.array(identifierSchema).max(10_000).nullable()
 
+const line = z.number().int().min(1).max(10_000_000)
+export const consoleStateSchema = z.object({
+  text: z.string().max(5_000_000),
+  database: identifierSchema.nullable(),
+  selection: z.object({ startLine: line, startColumn: line, endLine: line, endColumn: line }),
+  scrollTop: z.number().min(0).max(1e9)
+})
+
 export const runQuerySchema = z.object({
   sql: z.string().max(5_000_000),
   database: z.string().max(256).nullable().optional(),

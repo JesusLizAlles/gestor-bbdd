@@ -11,7 +11,7 @@ interface Props {
   /** Tabla de la pestaña activa, para resaltarla en el árbol. */
   activeTable: { database: string; schema: string | null; table: string } | null
   onOpenTable: (database: string, table: TableInfo) => void
-  /** Nueva consola SQL en esa base de datos. */
+  /** Consola SQL de esa base de datos (la guardada, si la hay). */
   onOpenConsole: (database: string) => void
 }
 
@@ -234,7 +234,7 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
                 actions={
                   <button
                     className="icon"
-                    title={`Nueva consola SQL en ${db}`}
+                    title={`Consola SQL de ${db}`}
                     onClick={(e) => {
                       e.stopPropagation()
                       onOpenConsole(db)

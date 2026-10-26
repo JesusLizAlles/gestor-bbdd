@@ -50,6 +50,7 @@ se genera por detrás.
   - Si hay cambios sin guardar, se avisa antes de cambiar de página, orden o filtro.
 - **Estructura** de cada tabla: columnas, índices, claves foráneas (con enlace a la tabla referenciada) y DDL.
 - **Consola SQL** (botón ⌨ junto a la conexión o a una base de datos, o «Consola» desde una tabla):
+  - Una consola por conexión y base de datos. Lo escrito se guarda solo, con el cursor, la selección, el desplazamiento y la base elegida. Al volver a abrirla, también tras reiniciar la app, sigue donde se dejó. «Consola» desde una tabla añade su `SELECT` al final.
   - Selector de base de datos. El autocompletado ofrece las tablas y columnas de la base elegida.
   - Entiende alias: tras `r.` en `FROM reservas r` solo sugiere columnas de `reservas`. Prioriza las columnas de las tablas que ya están en la consulta.
   - <kbd>Ctrl</kbd>+<kbd>Enter</kbd> ejecuta la sentencia bajo el cursor (o la selección); <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> ejecuta todo. Respeta `DELIMITER` (MySQL) y `GO` (SQL Server).
@@ -158,9 +159,9 @@ Cada conexión abierta usa **dos conexiones al servidor**:
 
 Con SSH, el driver conecta a `127.0.0.1:<puerto local>` y el túnel reenvía el tráfico al servidor.
 
-Los datos de la app se guardan en `~/.config/Gestor BBDD/`: `connections.json`, `secrets.json`, `known_hosts.json` y `history.json`, todos con permisos 0600.
+Los datos de la app se guardan en `~/.config/Gestor BBDD/`: `connections.json`, `secrets.json`, `known_hosts.json`, `history.json` y `consoles.json`, todos con permisos 0600.
 
-El historial guarda el texto de las consultas tal cual: si escribes datos sensibles en una consulta, quedan en `history.json`. Se puede borrar desde el panel de historial y se borra junto con la conexión. Los scripts de más de 100.000 caracteres no se guardan.
+El historial guarda el texto de las consultas tal cual: si escribes datos sensibles en una consulta, quedan en `history.json`. Se puede borrar desde el panel de historial y se borra junto con la conexión. Los scripts de más de 100.000 caracteres no se guardan. Lo mismo vale para lo escrito en las consolas (`consoles.json`): se borra al vaciar la consola o al borrar la conexión.
 
 ## Tests
 

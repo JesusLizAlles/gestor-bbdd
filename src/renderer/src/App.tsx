@@ -30,6 +30,7 @@ export function App() {
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [filterRequests, setFilterRequests] = useState<Record<string, { where: string; nonce: number }>>({})
+  const [sqlRequests, setSqlRequests] = useState<Record<string, { sql: string; nonce: number }>>({})
   const [editing, setEditing] = useState<ConnectionSummary | 'new' | null>(null)
   const [deleting, setDeleting] = useState<ConnectionSummary | null>(null)
   /** Conexiones abiertas con el árbol plegado (al conectar se despliega). */
@@ -114,25 +115,23 @@ export function App() {
     setActiveTabId(id)
   }
 
-  /** Nueva consola SQL de una sesión, opcionalmente con base de datos y texto de partida. */
+  /**
+   * Abre (o enfoca, si ya está abierta) la consola de una base de datos, con lo que se escribió en
+   * ella la última vez. `sql` se añade al final. Sin base de datos, la de la conexión.
+   */
   const openConsole = (sessionId: string, database: string | null, sql = '') => {
     const session = sessions.find((s) => s.info.sessionId === sessionId)
     if (!session) return
-    const number = tabs.filter((t) => t.type === 'console' && t.sessionId === sessionId).length + 1
-    const id = crypto.randomUUID()
-    const initialSql = sql ? `${sql};\n` : ''
-    setTabs((list) => [
-      ...list,
-      {
-        type: 'console',
-        id,
-        sessionId,
-        connection: session.connection,
-        title: `Consola ${number}`,
-        initialDatabase: database ?? session.connection.database ?? session.info.server.currentDatabase,
-        initialSql
-      }
-    ])
+    const home = database ?? session.connection.database ?? session.info.server.currentDatabase ?? null
+    const existing = tabs.find((t) => t.type === 'console' && t.sessionId === sessionId && t.homeDatabase === home)
+    const id = existing?.id ?? crypto.randomUUID()
+    if (!existing) {
+      setTabs((list) => [
+        ...list,
+        { type: 'console', id, sessionId, connection: session.connection, title: home ?? 'Consola', homeDatabase: home }
+      ])
+    }
+    if (sql) setSqlRequests((r) => ({ ...r, [id]: { sql, nonce: (r[id]?.nonce ?? 0) + 1 } }))
     setActiveTabId(id)
   }
 
@@ -197,7 +196,7 @@ export function App() {
                   <span className="actions" onClick={(e) => e.stopPropagation()}>
                     {session ? (
                       <>
-                        <button className="icon" title="Nueva consola SQL" onClick={() => openConsole(session.info.sessionId, null)}>
+                        <button className="icon" title="Consola SQL" onClick={() => openConsole(session.info.sessionId, null)}>
                           ⌨
                         </button>
                         <button className="icon" title="Desconectar" onClick={() => void disconnect(session.info.sessionId)}>
@@ -296,7 +295,7 @@ export function App() {
               onOpenConsole={(database, sql) => openConsole(t.sessionId, database, sql)}
             />
           ) : (
-            <ConsoleView key={t.id} tab={t} active={t.id === activeTabId} />
+            <ConsoleView key={t.id} tab={t} active={t.id === activeTabId} sqlRequest={sqlRequests[t.id] ?? null} />
           )
         )}
 

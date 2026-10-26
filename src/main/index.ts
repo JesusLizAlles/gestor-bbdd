@@ -9,6 +9,7 @@ import { registerIpc } from './ipc'
 import { SessionManager } from './sessions'
 import { KnownHosts } from './ssh/known-hosts'
 import { ConnectionStore } from './store/connections'
+import { ConsoleStore } from './store/consoles'
 import { HistoryStore } from './store/history'
 import { SecretVault, type SecretCipher } from './store/secrets'
 import { Updater, type UpdaterBackend } from './updater'
@@ -144,6 +145,7 @@ app.whenReady().then(() => {
   const vault = new SecretVault(dataDir, electronCipher)
   const store = new ConnectionStore(dataDir, vault)
   const history = new HistoryStore(dataDir)
+  const consoles = new ConsoleStore(dataDir)
   const sessions = new SessionManager({ createDriver, knownHosts: new KnownHosts(dataDir), history })
   const { backend, reason, manualDownload } = updaterBackend()
   const updater = new Updater({
@@ -155,7 +157,7 @@ app.whenReady().then(() => {
     log: updaterLog
   })
 
-  registerIpc({ store, vault, sessions, history, updater, window: () => mainWindow })
+  registerIpc({ store, vault, sessions, history, consoles, updater, window: () => mainWindow })
   const openWindow = () => {
     mainWindow = createWindow()
     mainWindow.on('closed', () => {
@@ -173,6 +175,8 @@ app.whenReady().then(() => {
   app.on('before-quit', () => {
     void sessions.closeAll()
   })
+  // Lo último escrito en las consolas puede seguir en vuelo: se termina de guardar antes de salir.
+  app.on('will-quit', () => consoles.flushSync())
 })
 
 app.on('window-all-closed', () => {

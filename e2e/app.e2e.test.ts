@@ -58,6 +58,7 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     if (shots) await page.screenshot({ path: join(shots, `${name}.png`) })
   }
   const tab = (name: string) => page.locator('.tab', { hasText: name })
+  const consoleTab = () => page.locator('.tab', { has: page.locator('.kind-console') })
   const view = () => page.locator('.table-view:visible, .console-view:visible')
   const firstRow = () => view().locator('.grid-row').first()
 
@@ -324,9 +325,10 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
   it('abre una consola en una base de datos con autocompletado por alias', async () => {
     const dbRow = page.locator('.tree-row', { hasText: DB })
     await dbRow.hover()
-    await dbRow.getByTitle(`Nueva consola SQL en ${DB}`).click()
-    await tab('Consola 1').waitFor()
-    await expect(view().getByLabel('Base de datos').inputValue()).resolves.toBe(DB)
+    await dbRow.getByTitle(`Consola SQL de ${DB}`).click()
+    await consoleTab().waitFor()
+    // La lista de bases de datos llega después de abrir la consola.
+    await expect.poll(() => view().getByLabel('Base de datos').inputValue()).toBe(DB)
     await view().locator('.hint', { hasText: 'Cargando tablas' }).waitFor({ state: 'detached' })
     await view().locator('.monaco-editor').click()
     await page.keyboard.type('SELECT r.hotel, r.importe FROM reservas r WHERE r.', { delay: 5 })
@@ -344,18 +346,21 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await shot('11-consola-resultados')
   })
 
-  it('abre una consola sobre la tabla visible y la ejecuta', async () => {
+  it('«Consola» en una tabla añade su SELECT al final de la consola de esa base de datos y lo ejecuta', async () => {
     await tab('reservas').click()
     await view().getByRole('tab', { name: 'Datos' }).click()
     await view().getByRole('button', { name: 'Consola', exact: true }).click()
-    await tab('Consola 2').waitFor()
+    // La misma consola de antes (una por base de datos), con lo escrito y la sentencia nueva debajo.
+    await expect.poll(() => consoleTab().count()).toBe(1)
+    await expect(consoleTab().getAttribute('aria-selected')).resolves.toBe('true')
+    await view().locator('.view-line', { hasText: 'r.importe > 1000' }).waitFor()
     await view().locator('.view-line', { hasText: 'SELECT * FROM' }).waitFor()
     await view().getByRole('button', { name: '▶ Ejecutar' }).click()
     await view().locator('.result-tab', { hasText: 'Resultado 1 (5)' }).waitFor()
   })
 
   it('el historial de la consola (Ctrl+Alt+E) busca e inserta consultas anteriores', async () => {
-    // Seguimos en "Consola 2", que acaba de ejecutar el SELECT de reservas.
+    // Seguimos en la consola, que acaba de ejecutar el SELECT de reservas.
     await view().locator('.monaco-editor').click()
     await page.keyboard.press('Control+Alt+e')
     const panel = view().getByRole('complementary', { name: 'Historial de consultas' })
@@ -367,7 +372,8 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await expect.poll(() => panel.locator('.history-item').count()).toBe(1)
     await shot('12-historial-consultas')
     await panel.getByLabel('Buscar en el historial').press('Enter')
-    await view().locator('.view-line', { hasText: 'WHERE r.importe > 1000' }).waitFor()
+    // La consola ya tenía esa consulta (es la misma de la primera prueba): ahora está dos veces.
+    await expect.poll(() => view().locator('.view-line', { hasText: 'WHERE r.importe > 1000' }).count()).toBe(2)
     // El cursor queda tras la sentencia insertada: Ctrl+Enter la ejecuta.
     await page.keyboard.press('Control+Enter')
     await view().locator('.result-tab', { hasText: 'Resultado 1 (3)' }).waitFor()
@@ -375,6 +381,16 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await expect(panel.locator('.history-item').first().innerText()).resolves.toContain('r.importe > 1000')
     await page.keyboard.press('Control+Alt+e')
     await expect.poll(() => panel.count()).toBe(0)
+  })
+
+  it('lo escrito en la consola se guarda: cerrarla y volver a abrirla lo recupera', async () => {
+    await consoleTab().getByTitle(/^Cerrar/).click()
+    await expect.poll(() => consoleTab().count()).toBe(0)
+    const dbRow = page.locator('.tree-row', { hasText: DB })
+    await dbRow.hover()
+    await dbRow.getByTitle(`Consola SQL de ${DB}`).click()
+    await view().locator('.view-line', { hasText: 'SELECT * FROM' }).waitFor()
+    await view().locator('.view-line', { hasText: 'r.importe > 1000' }).first().waitFor()
   })
 
   it('el campo WHERE recuerda los filtros de cada tabla', async () => {

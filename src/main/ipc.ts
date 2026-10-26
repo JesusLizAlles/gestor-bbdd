@@ -5,11 +5,13 @@ import { channelName, type ApiChannel, type IpcEnvelope } from '@shared/ipc'
 import type { ConnectionConfig, DbApi, SaveConnectionInput, SecretKey } from '@shared/types'
 import { ZodError } from 'zod'
 import type { SessionManager } from './sessions'
+import type { ConsoleStore } from './store/consoles'
 import type { HistoryStore } from './store/history'
 import type { Updater } from './updater'
 import type { ConnectionStore } from './store/connections'
 import type { SecretVault } from './store/secrets'
 import {
+  consoleStateSchema,
   countSchema,
   exportSchema,
   historyKindSchema,
@@ -29,6 +31,7 @@ export interface IpcDeps {
   vault: SecretVault
   sessions: SessionManager
   history: HistoryStore
+  consoles: ConsoleStore
   updater: Updater
   window: () => BrowserWindow | null
 }
@@ -52,7 +55,7 @@ async function mergeSecrets(vault: SecretVault, input: SaveConnectionInput): Pro
   return stored
 }
 
-export function registerIpc({ store, vault, sessions, history, updater, window }: IpcDeps): void {
+export function registerIpc({ store, vault, sessions, history, consoles, updater, window }: IpcDeps): void {
   const handlers: Handlers = {
     secretStorageStatus: async () => vault.status(),
     listConnections: () => store.list(),
@@ -61,6 +64,7 @@ export function registerIpc({ store, vault, sessions, history, updater, window }
       const connectionId = idSchema.parse(id)
       await store.delete(connectionId)
       await history.deleteConnection(connectionId)
+      await consoles.deleteConnection(connectionId)
     },
     setVisibleDatabases: (id, databases) =>
       store.setVisibleDatabases(idSchema.parse(id), visibleDatabasesSchema.parse(databases)),
@@ -98,6 +102,9 @@ export function registerIpc({ store, vault, sessions, history, updater, window }
     checkForUpdates: () => updater.check(true),
     downloadUpdate: () => updater.download(),
     installUpdate: async () => updater.install(),
+    loadConsole: (id, database) => consoles.get(idSchema.parse(id), identifierSchema.nullable().parse(database)),
+    saveConsole: (id, database, state) =>
+      consoles.save(idSchema.parse(id), identifierSchema.nullable().parse(database), consoleStateSchema.parse(state)),
     exportFile: async (raw) => {
       const input = exportSchema.parse(raw)
       const win = window()
