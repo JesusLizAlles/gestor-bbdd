@@ -15,6 +15,7 @@ import type {
   TableStructure
 } from '@shared/types'
 import { PAGE_SIZES } from '@shared/types'
+import { isAddRowKey, keys } from '../lib/platform'
 import { ConfirmDialog } from './ConfirmDialog'
 import { DataGrid, type FocusRequest, type PendingEdits } from './DataGrid'
 import { FilterInput } from './FilterInput'
@@ -379,11 +380,11 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
     }
   }
 
-  // Alt+Insert también funciona con el foco fuera de la rejilla (p. ej. tras pulsar un botón).
+  // Alt+Insert (Cmd+N en macOS) también funciona con el foco fuera de la rejilla (p. ej. tras pulsar un botón).
   useEffect(() => {
     if (!active || view !== 'data') return
     const onKey = (e: KeyboardEvent) => {
-      if (e.altKey && e.key === 'Insert' && !(e.target as HTMLElement).closest('.grid')) {
+      if (isAddRowKey(e) && !(e.target as HTMLElement).closest('.grid')) {
         e.preventDefault()
         addRow()
       }
@@ -472,7 +473,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
             <button
               className="icon"
               disabled={!editable || loading}
-              title="Añadir fila (Alt+Insert)"
+              title={keys('Añadir fila (Alt+Insert)')}
               aria-label="Añadir fila"
               onClick={addRow}
             >
@@ -481,7 +482,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
             <button
               className="icon"
               disabled={!editable || selectedRows.length === 0}
-              title="Borrar o restaurar las filas seleccionadas (Ctrl+Supr)"
+              title={keys('Borrar o restaurar las filas seleccionadas (Ctrl+Supr)')}
               aria-label="Borrar filas"
               onClick={() => deleteRows(selectedRows)}
             >
@@ -650,7 +651,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         )}
         {where && view === 'data' && <span className="filter-chip">Filtrado</span>}
         {view === 'data' && readOnlyReason && <span>{readOnlyReason}</span>}
-        {view === 'data' && editable && <span>Enter: editar · Arrastrar: seleccionar · Ctrl+C/V: copiar y pegar · Alt+Insert: fila nueva · Ctrl+Supr: borrar</span>}
+        {view === 'data' && editable && <span>{keys('Enter: editar · Arrastrar: seleccionar · Ctrl+C/V: copiar y pegar · Alt+Insert: fila nueva · Ctrl+Supr: borrar')}</span>}
         {sort[0] && view === 'data' && (
           <span>
             Orden: {sort[0].column} {sort[0].direction === 'asc' ? '▲' : '▼'}

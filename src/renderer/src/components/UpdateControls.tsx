@@ -8,6 +8,7 @@ const FLASH_MS = 6000
 /**
  * Actualizaciones: botón en la barra de estado (versión instalada → buscar), aviso cuando la
  * comprobación automática encuentra una versión nueva y diálogo para descargar e instalar.
+ * En macOS (sin firma) la descarga se abre en el navegador y se instala a mano.
  */
 export function UpdateControls() {
   const [state, setState] = useState<UpdateState | null>(null)
@@ -105,7 +106,7 @@ export function UpdateControls() {
 }
 
 function UpdateDialog({ state, onClose }: { state: UpdateState; onClose: () => void }) {
-  const { status, version, currentVersion, releaseNotes, releaseDate, percent, error } = state
+  const { status, version, currentVersion, releaseNotes, releaseDate, percent, error, manualInstall } = state
   const date = releaseDate ? new Date(releaseDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) : null
   const title = status === 'downloaded' ? 'Actualización lista' : status === 'downloading' ? 'Descargando actualización' : 'Actualización disponible'
 
@@ -125,6 +126,13 @@ function UpdateDialog({ state, onClose }: { state: UpdateState; onClose: () => v
               <div style={{ width: `${percent ?? 0}%` }} />
             </div>
           )}
+          {status === 'available' && manualInstall && (
+            <p className="note">
+              La descarga se abre en el navegador. Cierra la app, abre el .dmg y arrastra Gestor BBDD a Aplicaciones
+              para sustituir la versión anterior. Si macOS la bloquea al abrirla, ve a Ajustes del Sistema → Privacidad y
+              seguridad y pulsa «Abrir igualmente».
+            </p>
+          )}
           {status === 'downloaded' && (
             <p className="note">
               Al reiniciar se cierra la app: guarda antes los cambios pendientes de tablas y consolas. Si eliges «Al cerrar
@@ -143,7 +151,7 @@ function UpdateDialog({ state, onClose }: { state: UpdateState; onClose: () => v
             <>
               <button onClick={onClose}>Más tarde</button>
               <button className="primary" autoFocus onClick={() => void window.api.downloadUpdate()}>
-                Descargar
+                {manualInstall ? 'Descargar en el navegador' : 'Descargar'}
               </button>
             </>
           )}

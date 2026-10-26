@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEve
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { parseTsv, toTsv } from '@shared/format'
 import type { CellValue, ForeignKeyInfo, ResultColumn, SortSpec } from '@shared/types'
+import { isAddRowKey, isDeleteKey, keys } from '../lib/platform'
 
 const ROW_HEIGHT = 24
 const HEADER_HEIGHT = 40
@@ -222,7 +223,7 @@ export function DataGrid(props: Props) {
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (editing || columns.length === 0) return
-    if (e.altKey && e.key === 'Insert' && onAddRow) {
+    if (isAddRowKey(e) && onAddRow) {
       e.preventDefault()
       onAddRow()
       return
@@ -236,7 +237,7 @@ export function DataGrid(props: Props) {
       return
     }
     // Ctrl+Supr siempre; Supr solo si se han seleccionado filas enteras por su número.
-    if (e.key === 'Delete' && (e.ctrlKey || e.metaKey || mode === 'rows') && onDeleteRows && selectedRows.length) {
+    if (isDeleteKey(e) && (e.ctrlKey || e.metaKey || mode === 'rows') && onDeleteRows && selectedRows.length) {
       e.preventDefault()
       onDeleteRows(selectedRows)
       return
@@ -261,8 +262,8 @@ export function DataGrid(props: Props) {
       ArrowLeft: () => moveTo(cur.row, cur.col - 1, e.shiftKey),
       PageDown: () => moveTo(cur.row + pageRows, cur.col, e.shiftKey),
       PageUp: () => moveTo(cur.row - pageRows, cur.col, e.shiftKey),
-      Home: () => (e.ctrlKey ? moveTo(0, 0) : moveTo(cur.row, 0)),
-      End: () => (e.ctrlKey ? moveTo(total - 1, columns.length - 1) : moveTo(cur.row, columns.length - 1)),
+      Home: () => (e.ctrlKey || e.metaKey ? moveTo(0, 0) : moveTo(cur.row, 0)),
+      End: () => (e.ctrlKey || e.metaKey ? moveTo(total - 1, columns.length - 1) : moveTo(cur.row, columns.length - 1)),
       Tab: () => moveTo(cur.row, cur.col + (e.shiftKey ? -1 : 1))
     }
     if (editable && selected && (e.key === 'Enter' || e.key === 'F2') && !e.ctrlKey && !e.metaKey) {
@@ -521,7 +522,7 @@ export function DataGrid(props: Props) {
                   aria-sort={dir === 'asc' ? 'ascending' : dir === 'desc' ? 'descending' : 'none'}
                   className={`grid-cell ${onSort ? 'sortable' : ''} ${mode === 'columns' && colInRect(i) ? 'in-range' : ''}`}
                   style={{ width: widths[i] }}
-                  title={`${c.name} · ${c.type}${fk ? `\nReferencia a ${fk.refTable} (${fk.refColumns.join(', ')})` : ''}${onSort ? '\nClic: ordenar' : ''}\nCtrl+clic o arrastrar: seleccionar columnas`}
+                  title={`${c.name} · ${c.type}${fk ? `\nReferencia a ${fk.refTable} (${fk.refColumns.join(', ')})` : ''}${onSort ? '\nClic: ordenar' : ''}${keys('\nCtrl+clic o arrastrar: seleccionar columnas')}`}
                   onMouseDown={(e) => {
                     if (e.button !== 0) return
                     e.preventDefault()
@@ -603,7 +604,7 @@ export function DataGrid(props: Props) {
                         {linkable && !isEditing && (
                           <button
                             className="cell-link"
-                            title="Ir a la fila referenciada (Ctrl+clic o Ctrl+B)"
+                            title={keys('Ir a la fila referenciada (Ctrl+clic o Ctrl+B)')}
                             onClick={(e) => {
                               e.stopPropagation()
                               navigate(item.index, col)

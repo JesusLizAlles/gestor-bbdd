@@ -116,6 +116,28 @@ describe('Updater', () => {
     expect(await updater.check(true)).toEqual({ status: 'unsupported', currentVersion: '0.3.0', reason: 'desarrollo' })
   })
 
+  it('descarga manual (macOS sin firmar): avisa igual, pero «Descargar» abre la versión en el navegador', async () => {
+    const backend = new FakeBackend()
+    const manualDownload = vi.fn()
+    const sent: UpdateState[] = []
+    const updater = new Updater({ backend, currentVersion: '0.3.0', manualDownload, send: (s) => sent.push(s) })
+    expect(backend.autoInstallOnAppQuit).toBe(false)
+    expect(updater.get()).toMatchObject({ status: 'idle', manualInstall: true })
+
+    backend.checkForUpdates.mockImplementationOnce(async () => {
+      backend.emit('update-available', { version: '0.3.1' })
+      return null
+    })
+    await updater.check(false)
+    expect(sent.at(-1)).toMatchObject({ status: 'available', version: '0.3.1', manualInstall: true })
+
+    expect(await updater.download()).toMatchObject({ status: 'available', version: '0.3.1' })
+    expect(manualDownload).toHaveBeenCalledWith('0.3.1')
+    expect(backend.downloadUpdate).not.toHaveBeenCalled()
+    updater.install()
+    expect(backend.quitAndInstall).not.toHaveBeenCalled()
+  })
+
   it('las comprobaciones automáticas arrancan con retraso y se repiten', () => {
     vi.useFakeTimers()
     try {

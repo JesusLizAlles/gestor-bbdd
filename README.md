@@ -3,7 +3,7 @@
 Gestor de bases de datos de escritorio para **MySQL/MariaDB** y **SQL Server**, inspirado en DataGrip. Admite conexión
 directa por IP, TLS y **túnel SSH**. Está hecho con Electron, TypeScript y React.
 
-Es un proyecto de código abierto con [licencia MIT](LICENSE). Los instaladores para Linux (AppImage) y Windows están en
+Es un proyecto de código abierto con [licencia MIT](LICENSE). Los instaladores para Linux (AppImage), Windows y macOS están en
 [Releases](https://github.com/JesusLizAlles/gestor-bbdd/releases). Desde la versión 0.3.0, la app se actualiza sola.
 
 ## Qué hace ya
@@ -78,6 +78,7 @@ npm run build        # compila a out/
 npm start            # ejecuta lo compilado
 npm run dist:linux   # dist/gestor-bbdd-<versión>-linux-x86_64.AppImage
 npm run dist:win     # dist/gestor-bbdd-<versión>-setup.exe (mejor en Windows o en GitHub Actions)
+npm run dist:mac     # dist/gestor-bbdd-<versión>-mac-{arm64,x64}.dmg (solo en macOS o en GitHub Actions)
 npm run icons        # regenera resources/icon.png e icon.ico desde icon.svg (rsvg-convert + ImageMagick)
 ```
 
@@ -90,8 +91,8 @@ El flujo `.github/workflows/ci.yml` se ejecuta en GitHub Actions:
 | Cuándo | Qué hace |
 | --- | --- |
 | Push a `main` o pull request | Tipos, tests unitarios, integración contra una MariaDB 11.4 en contenedor y E2E con pantalla virtual (`xvfb`). |
-| «Run workflow» a mano (pestaña Actions) | Lo anterior y, además, el AppImage y el `.exe`. Quedan como artefactos 7 días. |
-| Etiqueta `vX.Y.Z` | Lo anterior y una **Release en borrador** con los dos instaladores y `SHA256SUMS.txt`. |
+| «Run workflow» a mano (pestaña Actions) | Lo anterior y, además, el AppImage, el `.exe` y los `.dmg`. Quedan como artefactos 7 días. |
+| Etiqueta `vX.Y.Z` | Lo anterior y una **Release en borrador** con los instaladores y `SHA256SUMS.txt`. |
 
 Para sacar una versión:
 
@@ -103,6 +104,12 @@ git push --follow-tags
 Cuando termine el flujo, la Release aparece en borrador en GitHub → Releases. Se revisa y se pulsa «Publish»: en ese momento las apps instaladas empiezan a detectarla. El flujo falla a propósito si la etiqueta no coincide con la `version` de `package.json`.
 
 Los instaladores de Windows **no van firmados**: Windows SmartScreen avisará al instalarlos hasta que se configure un certificado de firma de código.
+
+La app de macOS tampoco va firmada con un certificado Developer ID ni notarizada (solo firma ad-hoc). Hay un `.dmg` para Apple Silicon (`arm64`) y otro para Intel (`x64`). Para instalarla:
+
+1. Abre el `.dmg` y arrastra Gestor BBDD a Aplicaciones.
+2. Ábrela. macOS la bloqueará la primera vez.
+3. Ve a **Ajustes del Sistema → Privacidad y seguridad** y pulsa **«Abrir igualmente»**. Otra opción es ejecutar `xattr -cr "/Applications/Gestor BBDD.app"` en el Terminal.
 
 ## Actualizaciones automáticas
 
@@ -116,10 +123,11 @@ La app usa [electron-updater](https://www.electron.build/auto-update) y busca ve
   4. Se instala al pulsar «Reiniciar ahora», o al cerrar la app.
 - **Windows**: el instalador se ejecuta en silencio, conserva la carpeta de instalación y vuelve a abrir la app.
 - **Linux**: funciona con el **AppImage**, que se sustituye a sí mismo. Tiene que estar en una carpeta donde el usuario pueda escribir.
+- **macOS**: solo avisa. Sin firma Developer ID, Squirrel.Mac rechaza instalar la versión nueva, así que «Descargar en el navegador» abre el `.dmg` de la arquitectura del equipo. Se instala como la primera vez, incluida la autorización en Privacidad y seguridad.
 - **Sin firma de código**: la integridad de la descarga se comprueba con la huella SHA-512 de `latest.yml`. Si en el futuro se firma el instalador de Windows, electron-updater exigirá además que la versión nueva esté firmada por el mismo editor.
 - **Registro**: lo que hace el actualizador queda en `logs/updater.log`, dentro de la carpeta de datos de la app.
 
-Para publicar una actualización basta con sacar una versión, como se explica en el apartado anterior, y **publicar la Release**. El flujo sube junto a los instaladores `latest.yml`, `latest-linux.yml` y el `.blockmap`, que son los ficheros que leen las apps instaladas.
+Para publicar una actualización basta con sacar una versión, como se explica en el apartado anterior, y **publicar la Release**. El flujo sube junto a los instaladores `latest.yml`, `latest-linux.yml`, `latest-mac.yml` y el `.blockmap`, que son los ficheros que leen las apps instaladas.
 
 La versión 0.2.0 no incluye el actualizador: hay que instalar a mano una vez la 0.3.0 o posterior.
 

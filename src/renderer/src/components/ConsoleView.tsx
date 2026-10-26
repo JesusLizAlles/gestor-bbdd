@@ -3,6 +3,7 @@ import { splitStatements, statementAt } from '@shared/sql'
 import type { ConnectionSummary, QueryResult } from '@shared/types'
 import { DEFAULT_MAX_ROWS } from '@shared/types'
 import { setCompletionSource, type CompletionSource } from '../lib/monaco'
+import { isMac, keys } from '../lib/platform'
 import { ConfirmDialog } from './ConfirmDialog'
 import { QueryHistoryPanel } from './QueryHistoryPanel'
 import { ResultsPanel } from './ResultsPanel'
@@ -71,11 +72,12 @@ export function ConsoleView({ tab, active }: Props) {
   // Sube tras cada ejecución para que el panel de historial se recargue.
   const [historyVersion, setHistoryVersion] = useState(0)
 
-  // Ctrl+Alt+E abre o cierra el historial, como en DataGrip.
+  // Ctrl+Alt+E (Cmd+Opción+E en macOS) abre o cierra el historial, como en DataGrip.
+  // Por e.code: con Opción, la E del Mac es una tecla muerta y e.key no vale «e».
   useEffect(() => {
     if (!active) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'e') {
+      if ((isMac ? e.metaKey : e.ctrlKey) && e.altKey && e.code === 'KeyE') {
         e.preventDefault()
         setHistoryOpen((open) => !open)
       }
@@ -185,12 +187,12 @@ export function ConsoleView({ tab, active }: Props) {
         <button
           className="compact primary"
           disabled={running}
-          title="Ejecutar la sentencia bajo el cursor (Ctrl+Enter)"
+          title={keys('Ejecutar la sentencia bajo el cursor (Ctrl+Enter)')}
           onClick={() => editorRef.current?.runCurrent()}
         >
           ▶ Ejecutar
         </button>
-        <button className="compact" disabled={running} title="Ejecutar todo el script (Ctrl+Shift+Enter)" onClick={() => editorRef.current?.runAll()}>
+        <button className="compact" disabled={running} title={keys('Ejecutar todo el script (Ctrl+Shift+Enter)')} onClick={() => editorRef.current?.runAll()}>
           ▶▶ Todo
         </button>
         <button className="compact" disabled={!running} onClick={() => void window.api.cancelQuery(sessionId)}>
@@ -219,7 +221,7 @@ export function ConsoleView({ tab, active }: Props) {
         <button
           className={`compact ${historyOpen ? 'on' : ''}`}
           aria-pressed={historyOpen}
-          title="Historial de consultas (Ctrl+Alt+E)"
+          title={keys('Historial de consultas (Ctrl+Alt+E)')}
           onClick={() => setHistoryOpen((open) => !open)}
         >
           Historial
@@ -229,7 +231,7 @@ export function ConsoleView({ tab, active }: Props) {
           {completionState === 'loading' && 'Cargando tablas para el autocompletado… · '}
           {completionState === 'error' && 'No se pudo cargar el autocompletado · '}
           {!database && 'Elige una base de datos para autocompletar · '}
-          <kbd>Ctrl</kbd>+<kbd>Enter</kbd> sentencia actual
+          <kbd>{keys('Ctrl')}</kbd>+<kbd>Enter</kbd> sentencia actual
         </span>
       </div>
       <div className="console-body">

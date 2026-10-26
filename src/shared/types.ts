@@ -269,6 +269,8 @@ export interface UpdateState {
   reason?: string
   /** La comprobación la pidió el usuario: la interfaz enseña el resultado aunque no haya nada nuevo. */
   manual?: boolean
+  /** La versión nueva se descarga desde el navegador y se instala a mano (macOS sin firmar). */
+  manualInstall?: boolean
 }
 
 export interface ExportInput {

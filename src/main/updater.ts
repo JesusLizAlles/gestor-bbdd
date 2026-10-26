@@ -22,6 +22,11 @@ export interface UpdaterOptions {
   backend: UpdaterBackend | null
   currentVersion: string
   unsupportedReason?: string
+  /**
+   * Sin instalación automática (macOS sin firmar: Squirrel.Mac rechaza la versión nueva). Se sigue
+   * buscando versiones, pero «Descargar» llama aquí y el usuario instala la nueva a mano.
+   */
+  manualDownload?: (version: string) => void
   /** Avisa a la interfaz de cada cambio de estado. */
   send: (state: UpdateState) => void
   log?: (message: string) => void
@@ -83,12 +88,12 @@ export class Updater {
 
   constructor(private readonly opts: UpdaterOptions) {
     this.state = opts.backend
-      ? { status: 'idle', currentVersion: opts.currentVersion }
+      ? { status: 'idle', currentVersion: opts.currentVersion, ...this.installMode() }
       : { status: 'unsupported', currentVersion: opts.currentVersion, reason: opts.unsupportedReason }
     const backend = opts.backend
     if (!backend) return
     backend.autoDownload = false
-    backend.autoInstallOnAppQuit = true
+    backend.autoInstallOnAppQuit = !opts.manualDownload
     backend.on('checking-for-update', () => this.set({ status: 'checking' }))
     backend.on('update-available', (info: UpdateInfoLike) =>
       this.set({ status: 'available', version: info.version, releaseDate: info.releaseDate, releaseNotes: notesOf(info) })
@@ -132,6 +137,11 @@ export class Updater {
   async download(): Promise<UpdateState> {
     const { backend } = this.opts
     if (!backend || this.state.status !== 'available') return this.state
+    if (this.opts.manualDownload) {
+      this.opts.log?.(`Descarga manual de la versión ${this.state.version}`)
+      this.opts.manualDownload(this.state.version!)
+      return this.state
+    }
     this.set({ status: 'downloading', percent: 0, error: undefined })
     try {
       await backend.downloadUpdate()
@@ -166,7 +176,11 @@ export class Updater {
     const status = patch.status ?? this.state.status
     // Mientras haya una versión en juego se conservan sus datos; si no, se parte de cero.
     const base = ['available', 'downloading', 'downloaded'].includes(status) ? this.state : { status, currentVersion }
-    this.state = { ...base, ...patch, status, currentVersion, manual: this.manual }
+    this.state = { ...base, ...patch, status, currentVersion, manual: this.manual, ...this.installMode() }
     this.opts.send(this.state)
+  }
+
+  private installMode(): Pick<UpdateState, 'manualInstall'> {
+    return this.opts.manualDownload ? { manualInstall: true } : {}
   }
 }

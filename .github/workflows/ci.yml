@@ -2,8 +2,9 @@
 #
 # - Cada push a main y cada pull request: tipos, tests unitarios, de integración contra MariaDB y E2E.
 # - Al subir una etiqueta vX.Y.Z (que debe coincidir con "version" de package.json): además genera el
-#   AppImage (Linux) y el instalador .exe (Windows) y los deja en una Release en borrador. Al publicarla,
-#   las apps instaladas la detectan (electron-updater lee latest.yml / latest-linux.yml de la Release).
+#   AppImage (Linux), el instalador .exe (Windows) y los .dmg (macOS, arm64 y x64) y los deja en una
+#   Release en borrador. Al publicarla, las apps instaladas la detectan (electron-updater lee
+#   latest.yml / latest-linux.yml / latest-mac.yml de la Release).
 # - "Run workflow" a mano: tests y paquetes, sin Release (los paquetes quedan como artefactos 7 días).
 #
 # Las acciones van fijadas por commit (con la versión en el comentario) para que una etiqueta
@@ -109,6 +110,14 @@ jobs:
               dist/*.exe
               dist/*.exe.blockmap
               dist/latest.yml
+          # Sin firma Developer ID no hay instalación automática en macOS: latest-mac.yml solo sirve
+          # para avisar de la versión nueva, así que no hacen falta el .zip ni los .blockmap.
+          - name: macOS
+            os: macos-latest
+            script: dist:mac
+            files: |
+              dist/*.dmg
+              dist/latest-mac.yml
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

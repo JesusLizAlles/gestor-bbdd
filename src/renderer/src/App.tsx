@@ -6,6 +6,7 @@ import { ConsoleView, type OpenConsole } from './components/ConsoleView'
 import { Explorer } from './components/Explorer'
 import { TableView, type OpenTable } from './components/TableView'
 import { UpdateControls } from './components/UpdateControls'
+import { keys } from './lib/platform'
 
 interface OpenSession {
   info: SessionInfo
@@ -218,7 +219,7 @@ export function App() {
                 )}
                 <button
                   className="icon"
-                  title="Cerrar (Ctrl+W)"
+                  title={keys('Cerrar (Ctrl+W)')}
                   onClick={(e) => {
                     e.stopPropagation()
                     closeTab(t.id)
@@ -293,7 +294,7 @@ export function App() {
           </span>
         )}
         <span className="spacer" />
-        <span className="note">Doble clic: abrir tabla · Enter: editar celda · Alt+Enter: guardar · F5: recargar · Ctrl+W: cerrar</span>
+        <span className="note">{keys('Doble clic: abrir tabla · Enter: editar celda · Alt+Enter: guardar · F5: recargar · Ctrl+W: cerrar')}</span>
         <UpdateControls />
       </footer>
 

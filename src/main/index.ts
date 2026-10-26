@@ -48,8 +48,19 @@ function updaterLog(line: string): void {
   })().catch(() => {})
 }
 
+const RELEASES_URL = 'https://github.com/JesusLizAlles/gestor-bbdd/releases'
+
+/**
+ * En macOS la app no va firmada con Developer ID y Squirrel.Mac no instalaría la versión nueva:
+ * se abre en el navegador el .dmg de la arquitectura de este equipo (nombre de electron-builder.yml).
+ */
+function openMacDownload(version: string): void {
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64'
+  void shell.openExternal(`${RELEASES_URL}/download/v${version}/gestor-bbdd-${version}-mac-${arch}.dmg`)
+}
+
 /** electron-updater solo sirve en la app instalada y, en Linux, si se ejecuta como AppImage. */
-function updaterBackend(): { backend: UpdaterBackend | null; reason?: string } {
+function updaterBackend(): { backend: UpdaterBackend | null; reason?: string; manualDownload?: (version: string) => void } {
   if (!app.isPackaged) return { backend: null, reason: 'Las actualizaciones automáticas solo funcionan en la app instalada.' }
   if (process.platform === 'linux' && !process.env.APPIMAGE) {
     return { backend: null, reason: 'Esta instalación no es un AppImage: descarga las versiones nuevas desde GitHub.' }
@@ -61,7 +72,19 @@ function updaterBackend(): { backend: UpdaterBackend | null; reason?: string } {
     error: (m: unknown) => updaterLog(`ERROR ${String(m)}`),
     debug: (m: unknown) => updaterLog(`DEBUG ${String(m)}`)
   }
-  return { backend: autoUpdater as unknown as UpdaterBackend }
+  return {
+    backend: autoUpdater as unknown as UpdaterBackend,
+    manualDownload: process.platform === 'darwin' ? openMacDownload : undefined
+  }
+}
+
+/**
+ * Sin menú en Windows y Linux. En macOS hace falta uno: los atajos de edición (Cmd+C/V/X/Z/A en
+ * los campos de texto) y Cmd+Q funcionan a través de sus elementos.
+ */
+function applicationMenu(): Menu | null {
+  if (process.platform !== 'darwin') return null
+  return Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }])
 }
 
 function createWindow(): BrowserWindow {
@@ -116,31 +139,36 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
-  Menu.setApplicationMenu(null)
+  Menu.setApplicationMenu(applicationMenu())
   const dataDir = app.getPath('userData')
   const vault = new SecretVault(dataDir, electronCipher)
   const store = new ConnectionStore(dataDir, vault)
   const history = new HistoryStore(dataDir)
   const sessions = new SessionManager({ createDriver, knownHosts: new KnownHosts(dataDir), history })
-  const { backend, reason } = updaterBackend()
+  const { backend, reason, manualDownload } = updaterBackend()
   const updater = new Updater({
     backend,
     currentVersion: app.getVersion(),
     unsupportedReason: reason,
+    manualDownload,
     send: (state) => mainWindow?.webContents.send(UPDATE_STATE_EVENT, state),
     log: updaterLog
   })
 
   registerIpc({ store, vault, sessions, history, updater, window: () => mainWindow })
-  mainWindow = createWindow()
+  const openWindow = () => {
+    mainWindow = createWindow()
+    mainWindow.on('closed', () => {
+      mainWindow = null
+      void sessions.closeAll()
+    })
+  }
+  openWindow()
   updater.startAutoCheck()
-  mainWindow.on('closed', () => {
-    mainWindow = null
-    void sessions.closeAll()
-  })
 
+  // macOS: la app sigue viva sin ventanas; el clic en el Dock abre una nueva.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) openWindow()
   })
   app.on('before-quit', () => {
     void sessions.closeAll()

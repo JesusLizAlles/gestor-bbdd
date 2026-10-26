@@ -32,5 +32,13 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
 mac:
+  # Un .dmg por arquitectura (arm64 y x64): las arquitecturas se eligen en el script dist:mac.
   target: [dmg]
   category: public.app-category.developer-tools
+  # Sin certificado Developer ID: firma ad-hoc, sin la que Apple Silicon da la app por dañada.
+  # Gatekeeper pide autorizarla a mano la primera vez, y Squirrel.Mac no puede instalar
+  # actualizaciones: la app avisa y abre el .dmg nuevo en el navegador.
+  identity: '-'
+  # El runtime endurecido solo sirve para notarizar; con firma ad-hoc impediría cargar Electron.
+  hardenedRuntime: false
+  notarize: false
