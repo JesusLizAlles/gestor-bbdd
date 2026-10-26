@@ -11,6 +11,7 @@ export const API_CHANNELS = [
   'listConnections',
   'saveConnection',
   'deleteConnection',
+  'setVisibleDatabases',
   'testConnection',
   'openSession',
   'closeSession',

@@ -40,6 +40,11 @@ export interface ConnectionConfig {
   readOnly: boolean
   tls: TlsConfig
   ssh: SshConfig
+  /**
+   * Bases de datos que se ven en el explorador. Sin definir = todas, también las que se creen
+   * después. No forma parte del formulario: se cambia con setVisibleDatabases.
+   */
+  visibleDatabases?: string[]
 }
 
 export type SecretKey = 'password' | 'sshPassword' | 'sshPassphrase'
@@ -285,6 +290,8 @@ export interface DbApi {
   listConnections(): Promise<ConnectionSummary[]>
   saveConnection(input: SaveConnectionInput): Promise<ConnectionSummary>
   deleteConnection(id: string): Promise<void>
+  /** null = ver todas las bases de datos. */
+  setVisibleDatabases(connectionId: string, databases: string[] | null): Promise<ConnectionSummary>
   testConnection(input: SaveConnectionInput): Promise<ServerInfo>
   openSession(connectionId: string): Promise<SessionInfo>
   closeSession(sessionId: string): Promise<void>

@@ -75,6 +75,12 @@ export function App() {
     })
   })
 
+  /** Se aplica al momento en la lista y luego se guarda; si falla, se vuelve a leer lo guardado. */
+  const setVisibleDatabases = (id: string, visible: string[] | null) => {
+    setConnections((list) => list.map((c) => (c.id === id ? { ...c, visibleDatabases: visible ?? undefined } : c)))
+    window.api.setVisibleDatabases(id, visible).catch(() => void reloadConnections())
+  }
+
   const toggleConnection = (id: string) =>
     setCollapsed((set) => {
       const next = new Set(set)
@@ -218,6 +224,9 @@ export function App() {
                   <div hidden={!expanded}>
                     <Explorer
                       session={session.info}
+                      engine={c.engine}
+                      visibleDatabases={c.visibleDatabases}
+                      onVisibleDatabasesChange={(visible) => setVisibleDatabases(c.id, visible)}
                       activeTable={
                         activeTab?.type === 'table' && activeTab.sessionId === session.info.sessionId ? activeTab.ref : null
                       }

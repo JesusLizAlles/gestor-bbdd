@@ -52,6 +52,20 @@ describe('ConnectionStore + SecretVault', () => {
     expect((await new ConnectionStore(dir, reopened).list())[0]).toMatchObject({ name: 'Intranet', host: 'db.local' })
   })
 
+  it('bases de datos visibles: se guardan aparte y editar la conexión no las pierde', async () => {
+    const store = new ConnectionStore(dir, new SecretVault(dir, fakeCipher(true)))
+    const { id } = await store.save({ config: input() })
+    expect((await store.setVisibleDatabases(id, ['intranet', 'rrhh', 'intranet'])).visibleDatabases).toEqual(['intranet', 'rrhh'])
+
+    // El formulario no envía la selección (y zod la descartaría): se conserva.
+    await store.save({ config: { ...input({ name: 'Renombrada' }), id } })
+    const reopened = new ConnectionStore(dir, new SecretVault(dir, fakeCipher(true)))
+    expect((await reopened.get(id)).visibleDatabases).toEqual(['intranet', 'rrhh'])
+
+    expect((await reopened.setVisibleDatabases(id, null)).visibleDatabases).toBeUndefined()
+    await expect(reopened.setVisibleDatabases('no-existe', [])).rejects.toThrow('no existe')
+  })
+
   it('undefined conserva, null borra y string reemplaza secretos', async () => {
     const vault = new SecretVault(dir, fakeCipher(true))
     const store = new ConnectionStore(dir, vault)

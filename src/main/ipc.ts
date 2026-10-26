@@ -20,7 +20,8 @@ import {
   saveConnectionSchema,
   tableDataSchema,
   tableRefSchema,
-  rowChangesSchema
+  rowChangesSchema,
+  visibleDatabasesSchema
 } from './validation'
 
 export interface IpcDeps {
@@ -61,6 +62,8 @@ export function registerIpc({ store, vault, sessions, history, updater, window }
       await store.delete(connectionId)
       await history.deleteConnection(connectionId)
     },
+    setVisibleDatabases: (id, databases) =>
+      store.setVisibleDatabases(idSchema.parse(id), visibleDatabasesSchema.parse(databases)),
     testConnection: async (raw) => {
       const input = saveConnectionSchema.parse(raw)
       const config: ConnectionConfig = { ...input.config, id: input.config.id ?? 'prueba' }

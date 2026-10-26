@@ -54,6 +54,7 @@ export const saveConnectionSchema = z.object({
 
 export const idSchema = z.string().min(1).max(100)
 export const identifierSchema = z.string().min(1).max(256)
+export const visibleDatabasesSchema = z.array(identifierSchema).max(10_000).nullable()
 
 export const runQuerySchema = z.object({
   sql: z.string().max(5_000_000),

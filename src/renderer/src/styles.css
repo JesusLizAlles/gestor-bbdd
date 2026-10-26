@@ -268,6 +268,74 @@ input[type='checkbox'] {
   flex: 1;
   min-width: 0;
 }
+.db-picker-btn {
+  flex: none;
+  padding: 0 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.db-picker-btn.filtered {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Selector de bases de datos visibles */
+.db-picker {
+  position: fixed;
+  z-index: 30;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  min-height: 120px;
+}
+.db-picker label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.db-picker label:hover {
+  background: var(--bg-hover);
+}
+.db-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.db-picker-search {
+  margin: 6px 10px 2px;
+  width: auto;
+}
+.db-picker-list {
+  overflow: auto;
+  padding: 4px 0;
+  min-height: 0;
+}
+.db-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.db-picker-system {
+  color: var(--warn);
+  font-size: 11px;
+}
+.db-picker label.missing .db-picker-name {
+  font-style: italic;
+  color: var(--text-dim);
+}
+.db-picker-empty {
+  padding: 6px 10px;
+  color: var(--text-dim);
+}
 .tree-row {
   display: flex;
   align-items: center;

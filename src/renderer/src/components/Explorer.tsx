@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { ColumnInfo, SessionInfo, TableInfo } from '@shared/types'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import type { ColumnInfo, Engine, SessionInfo, TableInfo } from '@shared/types'
+import { DatabasePicker } from './DatabasePicker'
 
 interface Props {
   session: SessionInfo
+  engine: Engine
+  /** Bases de datos que se muestran; undefined = todas. */
+  visibleDatabases: string[] | undefined
+  onVisibleDatabasesChange: (visible: string[] | null) => void
   /** Tabla de la pestaña activa, para resaltarla en el árbol. */
   activeTable: { database: string; schema: string | null; table: string } | null
   onOpenTable: (database: string, table: TableInfo) => void
@@ -51,12 +56,15 @@ function Row(props: {
  * Árbol de una sesión, colgado de su conexión en la lista: bases de datos → tablas/vistas →
  * columnas, cargado bajo demanda.
  */
-export function Explorer({ session, activeTable, onOpenTable, onOpenConsole }: Props) {
+export function Explorer({ session, engine, visibleDatabases, onVisibleDatabasesChange, activeTable, onOpenTable, onOpenConsole }: Props) {
   const [databases, setDatabases] = useState<Loadable<string[]>>({ state: 'loading' })
   const [tables, setTables] = useState<Record<string, Loadable<TableInfo[]>>>({})
   const [columns, setColumns] = useState<Record<string, Loadable<ColumnInfo[]>>>({})
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [filter, setFilter] = useState('')
+  const [picking, setPicking] = useState(false)
+  const pickerButton = useRef<HTMLButtonElement>(null)
+  const closePicker = useCallback(() => setPicking(false), [])
 
   const loadDatabases = useCallback(async () => {
     setDatabases({ state: 'loading' })
@@ -113,6 +121,8 @@ export function Explorer({ session, activeTable, onOpenTable, onOpenConsole }: P
   }
 
   const needle = filter.trim().toLowerCase()
+  const allDatabases = databases.state === 'ready' ? databases.value : []
+  const shownDatabases = visibleDatabases ? allDatabases.filter((db) => visibleDatabases.includes(db)) : allDatabases
 
   const renderObject = (db: string, t: TableInfo, depth: number) => {
     const key = tableKey(db, t)
@@ -179,14 +189,36 @@ export function Explorer({ session, activeTable, onOpenTable, onOpenConsole }: P
     <div>
       <div className="explorer-filter">
         <input placeholder="Filtrar tablas…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <button
+          ref={pickerButton}
+          className={`db-picker-btn ${visibleDatabases ? 'filtered' : ''}`}
+          title="Elegir qué bases de datos se ven"
+          disabled={databases.state !== 'ready'}
+          onClick={() => setPicking((open) => !open)}
+        >
+          {visibleDatabases ? `${shownDatabases.length} de ${allDatabases.length}` : 'Todas'} ▾
+        </button>
         <button className="icon" title="Recargar" onClick={refresh}>
           ↻
         </button>
       </div>
+      {picking && pickerButton.current && (
+        <DatabasePicker
+          engine={engine}
+          databases={allDatabases}
+          visible={visibleDatabases}
+          onChange={onVisibleDatabasesChange}
+          anchor={pickerButton.current}
+          onClose={closePicker}
+        />
+      )}
       {databases.state === 'loading' && <Row depth={1} kind="folder" label="Cargando…" />}
       {databases.state === 'error' && <div className="tree-error">{databases.message}</div>}
+      {databases.state === 'ready' && shownDatabases.length === 0 && (
+        <Row depth={1} kind="folder" label="Ninguna base de datos elegida" onClick={() => setPicking(true)} />
+      )}
       {databases.state === 'ready' &&
-        databases.value.map((db) => {
+        shownDatabases.map((db) => {
           const key = `db:${db}`
           const open = expanded.has(key)
           const count = tables[db]?.state === 'ready' ? String((tables[db] as { value: TableInfo[] }).value.length) : undefined

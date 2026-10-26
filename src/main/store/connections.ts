@@ -37,10 +37,24 @@ export class ConnectionStore {
     const id = parsed.id ?? randomUUID()
     const config: ConnectionConfig = { ...parsed, id }
     const index = file.connections.findIndex((c) => c.id === id)
+    // La selección de bases de datos no viene del formulario: se conserva al editar.
+    const visible = index >= 0 ? file.connections[index]!.visibleDatabases : undefined
+    if (visible) config.visibleDatabases = visible
     if (index >= 0) file.connections[index] = config
     else file.connections.push(config)
     await writeJson(this.path, file)
     await this.vault.apply(id, input.secrets)
+    return this.summarize(config)
+  }
+
+  /** Bases de datos visibles en el explorador; null = todas. */
+  async setVisibleDatabases(id: string, databases: string[] | null): Promise<ConnectionSummary> {
+    const file = await this.load()
+    const config = file.connections.find((c) => c.id === id)
+    if (!config) throw new Error('La conexión no existe')
+    if (databases) config.visibleDatabases = [...new Set(databases)]
+    else delete config.visibleDatabases
+    await writeJson(this.path, file)
     return this.summarize(config)
   }
 
