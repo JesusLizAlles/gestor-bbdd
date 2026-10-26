@@ -16,6 +16,8 @@
   --env-test: #e0a84a;
   --env-prod: #e5534b;
   --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+  /* Altura común de botones, inputs y selects: alineados cuando van uno al lado del otro. */
+  --control-h: 28px;
   color-scheme: dark;
 }
 
@@ -44,7 +46,13 @@ button {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 4px 10px;
+  height: var(--control-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 10px;
+  white-space: nowrap;
   cursor: pointer;
 }
 button:hover:not(:disabled) {
@@ -66,7 +74,9 @@ button.danger {
   border-color: var(--danger);
   color: var(--danger);
 }
+/* Los de icono van también dentro de filas pequeñas (árbol, pestañas): sin altura fija. */
 button.icon {
+  height: auto;
   background: none;
   border: none;
   padding: 2px 6px;
@@ -84,7 +94,8 @@ select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 5px 8px;
+  height: var(--control-h);
+  padding: 0 8px;
   width: 100%;
   user-select: text;
 }
@@ -95,6 +106,7 @@ select:focus {
 }
 input[type='checkbox'] {
   width: auto;
+  height: auto;
 }
 
 /* Disposición general */
@@ -261,6 +273,7 @@ input[type='checkbox'] {
 /* Árbol del explorador */
 .explorer-filter {
   display: flex;
+  align-items: center;
   gap: 4px;
   padding: 2px 8px 4px 20px;
 }
@@ -268,9 +281,12 @@ input[type='checkbox'] {
   flex: 1;
   min-width: 0;
 }
+.explorer-filter > button.icon {
+  height: var(--control-h);
+}
 .db-picker-btn {
   flex: none;
-  padding: 0 6px;
+  padding: 0 8px;
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -721,6 +737,8 @@ input[type='checkbox'] {
   color: var(--warn);
 }
 .link {
+  display: inline;
+  height: auto;
   background: none;
   border: none;
   color: var(--accent-hover);
@@ -1014,6 +1032,7 @@ button.compact {
 }
 .cell-link {
   display: none;
+  height: auto;
   position: absolute;
   right: 2px;
   top: 2px;
@@ -1352,6 +1371,7 @@ button.compact.on {
 
 /* Actualizaciones */
 .update-btn {
+  height: auto;
   background: none;
   border: none;
   padding: 0 6px;
@@ -1525,29 +1545,14 @@ button.compact.on {
   background: #4b7a50;
 }
 
-/* Barra del visor de tablas: todos los controles a la misma altura. */
-.table-toolbar {
-  --control-h: 28px;
-}
-.table-toolbar > button,
-.table-toolbar > select,
+/* Barra del visor de tablas: los de icono y el selector segmentado, a la altura común. */
+.table-toolbar > button.icon,
 .table-toolbar .segmented {
   height: var(--control-h);
-}
-.table-toolbar > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding-top: 0;
-  padding-bottom: 0;
 }
 .table-toolbar > button.icon {
   min-width: var(--control-h);
   padding: 0 6px;
-}
-.table-toolbar > select {
-  padding-top: 0;
-  padding-bottom: 0;
 }
 .table-toolbar .segmented button {
   height: 100%;
