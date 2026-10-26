@@ -265,6 +265,60 @@ input[type='checkbox'] {
   background: #4b3f72;
   color: #e3dcff;
 }
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.section-actions .svg-icon {
+  width: 14px;
+  height: 14px;
+}
+
+/* Exportar / importar conexiones */
+.transfer-list {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 4px 0;
+  margin-bottom: 10px;
+}
+.transfer-list .check {
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.transfer-list .check:hover {
+  background: var(--bg-hover);
+}
+.transfer-all {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+  padding-bottom: 5px !important;
+}
+.transfer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.transfer-host {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.transfer-option {
+  margin: 4px 0 10px;
+}
+.transfer-pass-error {
+  color: var(--warn);
+}
+.notice code {
+  font-family: var(--mono);
+  word-break: break-all;
+}
 .empty-note {
   padding: 10px;
   color: var(--text-dim);

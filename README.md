@@ -12,10 +12,16 @@ La pantalla principal es el **visor de tablas**, como en DataGrip: al abrir una 
 se genera por detrás.
 
 - **Conexiones** guardadas con entorno (desarrollo, pruebas, producción) y prueba de conexión antes de guardar.
+  Al arrancar se conectan todas, con su árbol plegado. Mientras conectan se ve un indicador; si falla, un aviso ⚠ con el error en el tooltip, y un clic reintenta.
+- **Exportar e importar conexiones** (iconos junto al ＋) para pasarlas a otro equipo, en un fichero `.json`:
+  - Exportar: se eligen las conexiones. Las contraseñas son opcionales; si se incluyen, van cifradas (scrypt + AES-256-GCM) con una clave que se pide al importar y no se guarda en ningún sitio.
+  - Importar: muestra qué trae el fichero y cuáles sustituyen a una existente. Reimportar el mismo fichero actualiza, no duplica. Sin la clave se importa todo menos las contraseñas.
+  - Las rutas de claves SSH y certificados viajan tal cual: si en el otro equipo están en otra carpeta, hay que cambiarlas.
 - **Contraseñas** cifradas con el llavero del sistema (KWallet/libsecret, Keychain, DPAPI). Sin llavero, solo en memoria.
 - **Túnel SSH** con contraseña, clave privada o agente. La huella del servidor se guarda la primera vez y, si cambia, se rechaza la conexión.
 - **TLS** opcional, con verificación de certificado y CA propia.
-- **Explorador**: bases de datos → tablas y vistas → columnas, con filtro. Doble clic en una tabla para abrirla en una pestaña.
+- **Explorador**: cada conexión despliega su árbol de bases de datos → tablas y vistas → columnas, con filtro. Doble clic en una tabla para abrirla en una pestaña.
+  El botón «Todas ▾» elige qué bases de datos se ven en cada conexión (con atajo para ocultar las del sistema). La selección se guarda.
 - **Visor de datos**:
   - Paginación de 100 a 5000 filas. El total se cuenta solo al pulsar «?»: contar tablas enormes es caro.
   - Orden al pulsar la cabecera (▲, ▼, sin orden). Sin orden, se pagina por clave primaria para que las páginas sean estables.

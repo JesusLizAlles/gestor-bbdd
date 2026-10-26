@@ -56,6 +56,10 @@ export const idSchema = z.string().min(1).max(100)
 export const identifierSchema = z.string().min(1).max(256)
 export const visibleDatabasesSchema = z.array(identifierSchema).max(10_000).nullable()
 
+const passphrase = z.string().min(1).max(1024).nullable()
+export const exportConfigSchema = z.object({ connectionIds: z.array(idSchema).min(1).max(1000), passphrase })
+export const importConfigSchema = z.object({ token: idSchema, connectionIds: z.array(idSchema).min(1).max(1000), passphrase })
+
 const line = z.number().int().min(1).max(10_000_000)
 export const consoleStateSchema = z.object({
   text: z.string().max(5_000_000),

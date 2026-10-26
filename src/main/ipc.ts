@@ -1,10 +1,12 @@
-import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { readFile, stat, writeFile } from 'node:fs/promises'
+import { basename, join } from 'node:path'
 import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
 import { channelName, type ApiChannel, type IpcEnvelope } from '@shared/ipc'
 import type { ConnectionConfig, DbApi, SaveConnectionInput, SecretKey } from '@shared/types'
 import { ZodError } from 'zod'
 import type { SessionManager } from './sessions'
+import { decryptSecrets, exportConnections, importConnections, parseConfigFile, type ConfigFile } from './config-transfer'
 import type { ConsoleStore } from './store/consoles'
 import type { HistoryStore } from './store/history'
 import type { Updater } from './updater'
@@ -13,11 +15,13 @@ import type { SecretVault } from './store/secrets'
 import {
   consoleStateSchema,
   countSchema,
+  exportConfigSchema,
   exportSchema,
   historyKindSchema,
   historySearchSchema,
   identifierSchema,
   idSchema,
+  importConfigSchema,
   runQuerySchema,
   saveConnectionSchema,
   tableDataSchema,
@@ -55,7 +59,12 @@ async function mergeSecrets(vault: SecretVault, input: SaveConnectionInput): Pro
   return stored
 }
 
+/** Un fichero de exportación de conexiones razonable ocupa unos KB; esto sobra. */
+const MAX_IMPORT_BYTES = 20 * 1024 * 1024
+
 export function registerIpc({ store, vault, sessions, history, consoles, updater, window }: IpcDeps): void {
+  // Último fichero leído para importar: importConfig lo usa por token, sin recibir rutas del renderer.
+  let pendingImport: { token: string; file: ConfigFile } | null = null
   const handlers: Handlers = {
     secretStorageStatus: async () => vault.status(),
     listConnections: () => store.list(),
@@ -105,6 +114,58 @@ export function registerIpc({ store, vault, sessions, history, consoles, updater
     loadConsole: (id, database) => consoles.get(idSchema.parse(id), identifierSchema.nullable().parse(database)),
     saveConsole: (id, database, state) =>
       consoles.save(idSchema.parse(id), identifierSchema.nullable().parse(database), consoleStateSchema.parse(state)),
+    exportConfig: async (raw) => {
+      const input = exportConfigSchema.parse(raw)
+      const file = await exportConnections(store, vault, input.connectionIds, input.passphrase, app.getVersion())
+      const win = window()
+      const options = {
+        title: 'Exportar conexiones',
+        defaultPath: join(app.getPath('documents'), `gestor-bbdd-conexiones-${new Date().toISOString().slice(0, 10)}.json`),
+        filters: [{ name: 'Conexiones de Gestor BBDD', extensions: ['json'] }]
+      }
+      const { canceled, filePath } = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+      if (canceled || !filePath) return null
+      await writeFile(filePath, JSON.stringify(file, null, 2), { encoding: 'utf8', mode: 0o600 })
+      return filePath
+    },
+    previewImport: async () => {
+      const win = window()
+      const options = {
+        title: 'Importar conexiones',
+        properties: ['openFile' as const],
+        filters: [{ name: 'Conexiones de Gestor BBDD', extensions: ['json'] }]
+      }
+      const { canceled, filePaths } = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      const path = filePaths[0]
+      if (canceled || !path) return null
+      if ((await stat(path)).size > MAX_IMPORT_BYTES) throw new Error('El fichero es demasiado grande para ser una exportación de conexiones')
+      const file = parseConfigFile(await readFile(path, 'utf8'))
+      const existing = new Set((await store.list()).map((c) => c.id))
+      pendingImport = { token: randomUUID(), file }
+      return {
+        token: pendingImport.token,
+        fileName: basename(path),
+        exportedAt: file.exportedAt,
+        encrypted: file.secrets !== null,
+        connections: file.connections.map((c) => ({
+          id: c.id,
+          name: c.name,
+          engine: c.engine,
+          host: c.host,
+          environment: c.environment,
+          exists: existing.has(c.id)
+        }))
+      }
+    },
+    importConfig: async (raw) => {
+      const input = importConfigSchema.parse(raw)
+      if (pendingImport?.token !== input.token) throw new Error('Vuelve a elegir el fichero que quieres importar')
+      const { file } = pendingImport
+      const secrets = input.passphrase !== null && file.secrets ? await decryptSecrets(file, input.passphrase) : {}
+      const result = await importConnections(store, file, input.connectionIds, secrets)
+      pendingImport = null
+      return result
+    },
     exportFile: async (raw) => {
       const input = exportSchema.parse(raw)
       const win = window()

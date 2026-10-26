@@ -22,7 +22,11 @@ const PATHS = {
   prev: <path d="M10 4.5 6.5 8l3.5 3.5" />,
   next: <path d="M6 4.5 9.5 8 6 11.5" />,
   last: <path d="M11.5 4v8M4.5 4.5 8 8l-3.5 3.5" />,
-  chevronDown: <path d="M5 6.5 8 9.5l3-3" />
+  chevronDown: <path d="M5 6.5 8 9.5l3-3" />,
+  /** Flecha que entra en una bandeja. */
+  import: <path d="M8 2.5v7M5 6.5l3 3 3-3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />,
+  /** Flecha que sale de una bandeja. */
+  export: <path d="M8 9.5v-7M5 5.5l3-3 3 3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />
 }
 
 export type IconName = keyof typeof PATHS

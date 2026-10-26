@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConnectionSummary, ObjectKind, SecretStorageStatus, SessionInfo, TableInfo, TableRef } from '@shared/types'
+import { ExportDialog, ImportDialog } from './components/ConfigTransfer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ConnectionDialog } from './components/ConnectionDialog'
 import { ConsoleView, type OpenConsole } from './components/ConsoleView'
 import { Explorer } from './components/Explorer'
+import { Icon } from './components/Icon'
 import { TableView, type OpenTable } from './components/TableView'
 import { UpdateControls } from './components/UpdateControls'
 import { keys } from './lib/platform'
@@ -33,6 +35,7 @@ export function App() {
   const [sqlRequests, setSqlRequests] = useState<Record<string, { sql: string; nonce: number }>>({})
   const [editing, setEditing] = useState<ConnectionSummary | 'new' | null>(null)
   const [deleting, setDeleting] = useState<ConnectionSummary | null>(null)
+  const [transfer, setTransfer] = useState<'export' | 'import' | null>(null)
   /** Conexiones abiertas con el árbol plegado (al conectar se despliega). */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
@@ -159,9 +162,22 @@ export function App() {
       <aside className="sidebar">
         <div className="section-title">
           Conexiones
-          <button className="icon" title="Nueva conexión" onClick={() => setEditing('new')}>
-            ＋
-          </button>
+          <span className="section-actions">
+            <button className="icon" title="Importar conexiones…" onClick={() => setTransfer('import')}>
+              <Icon name="import" />
+            </button>
+            <button
+              className="icon"
+              title="Exportar conexiones…"
+              disabled={connections.length === 0}
+              onClick={() => setTransfer('export')}
+            >
+              <Icon name="export" />
+            </button>
+            <button className="icon" title="Nueva conexión" onClick={() => setEditing('new')}>
+              ＋
+            </button>
+          </span>
         </div>
         <div className="connections">
           {connections.length === 0 && <div className="empty-note">Aún no hay conexiones. Pulsa ＋ para crear una.</div>}
@@ -366,6 +382,9 @@ export function App() {
           }}
         />
       )}
+
+      {transfer === 'export' && <ExportDialog connections={connections} onClose={() => setTransfer(null)} />}
+      {transfer === 'import' && <ImportDialog onClose={() => setTransfer(null)} onImported={() => void reloadConnections()} />}
 
       {deleting && (
         <ConfirmDialog

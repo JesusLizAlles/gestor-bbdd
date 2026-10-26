@@ -288,6 +288,36 @@ export interface ConsoleState {
   scrollTop: number
 }
 
+export interface ExportConfigInput {
+  connectionIds: string[]
+  /** Clave para cifrar las contraseñas; null = exportar sin contraseñas. */
+  passphrase: string | null
+}
+
+/** Lo que trae un fichero de conexiones, antes de importarlo. */
+export interface ImportPreview {
+  /** Identifica el fichero leído para importConfig (el renderer no pasa rutas). */
+  token: string
+  fileName: string
+  exportedAt: string
+  /** Trae contraseñas, cifradas con la clave de quien exportó. */
+  encrypted: boolean
+  connections: { id: string; name: string; engine: Engine; host: string; environment: Environment; exists: boolean }[]
+}
+
+export interface ImportConfigInput {
+  token: string
+  connectionIds: string[]
+  /** null = importar sin contraseñas. */
+  passphrase: string | null
+}
+
+export interface ImportResult {
+  added: number
+  updated: number
+  withPasswords: boolean
+}
+
 export interface ExportInput {
   defaultName: string
   format: 'csv' | 'json' | 'sql'
@@ -331,6 +361,12 @@ export interface DbApi {
   /** Consola guardada de una conexión y base de datos (null = sin base de datos); null si no hay. */
   loadConsole(connectionId: string, database: string | null): Promise<ConsoleState | null>
   saveConsole(connectionId: string, database: string | null, state: ConsoleState): Promise<void>
+  /** Guarda las conexiones elegidas en un fichero; devuelve su ruta (null si se cancela). */
+  exportConfig(input: ExportConfigInput): Promise<string | null>
+  /** Pide un fichero exportado y dice qué trae; null si se cancela. */
+  previewImport(): Promise<ImportPreview | null>
+  /** Importa del último fichero leído; la misma conexión (mismo id) se actualiza, no se duplica. */
+  importConfig(input: ImportConfigInput): Promise<ImportResult>
   exportFile(input: ExportInput): Promise<string | null>
   pickFile(title: string): Promise<string | null>
 }

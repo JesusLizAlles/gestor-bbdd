@@ -34,6 +34,9 @@ export const API_CHANNELS = [
   'installUpdate',
   'loadConsole',
   'saveConsole',
+  'exportConfig',
+  'previewImport',
+  'importConfig',
   'exportFile',
   'pickFile'
 ] as const satisfies readonly ApiChannel[]
