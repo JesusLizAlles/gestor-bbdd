@@ -15,7 +15,8 @@ interface Props {
 type Loadable<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string }
 
 const tableKey = (db: string, t: TableInfo) => `${db}\u0000${t.schema ?? ''}\u0000${t.name}`
-const tableLabel = (t: TableInfo) => (t.schema && t.schema !== 'dbo' ? `${t.schema}.${t.name}` : t.name)
+const groupKey = (db: string, kind: TableInfo['kind']) => `group:${kind}:${db}`
+const tableLabel =(t: TableInfo) => (t.schema && t.schema !== 'dbo' ? `${t.schema}.${t.name}` : t.name)
 
 function Row(props: {
   depth: number
@@ -74,6 +75,8 @@ export function Explorer({ session, connectionName, activeTable, onOpenTable, on
     try {
       const value = await window.api.listTables(session.sessionId, db)
       setTables((t) => ({ ...t, [db]: { state: 'ready', value } }))
+      // Si hay vistas, la carpeta de tablas aparece ya desplegada.
+      if (value.some((t) => t.kind === 'view')) setExpanded((prev) => new Set(prev).add(groupKey(db, 'table')))
     } catch (err) {
       setTables((t) => ({ ...t, [db]: { state: 'error', message: (err as Error).message } }))
     }
@@ -111,42 +114,62 @@ export function Explorer({ session, connectionName, activeTable, onOpenTable, on
   const needle = filter.trim().toLowerCase()
   const rootOpen = expanded.has('root')
 
+  const renderObject = (db: string, t: TableInfo, depth: number) => {
+    const key = tableKey(db, t)
+    const open = expanded.has(key)
+    const cols = columns[key]
+    return (
+      <div key={key}>
+        <Row
+          depth={depth}
+          kind={t.kind}
+          label={tableLabel(t)}
+          expanded={open}
+          title={t.kind === 'view' ? 'Doble clic: abrir la vista' : 'Doble clic: abrir la tabla'}
+          active={activeTable?.database === db && activeTable.table === t.name && (activeTable.schema ?? null) === (t.schema ?? null)}
+          onClick={() => toggle(key, () => cols?.state !== 'ready' && void loadColumns(db, t))}
+          onDoubleClick={() => onOpenTable(db, t)}
+        />
+        {open && cols?.state === 'loading' && <Row depth={depth + 1} kind="folder" label="Cargando…" />}
+        {open && cols?.state === 'error' && <div className="tree-error">{cols.message}</div>}
+        {open &&
+          cols?.state === 'ready' &&
+          cols.value.map((c) => (
+            <Row
+              key={c.name}
+              depth={depth + 1}
+              kind={c.isPrimaryKey ? 'pk' : 'col'}
+              label={c.name}
+              meta={`${c.dataType}${c.nullable ? '' : ' not null'}`}
+              title={c.defaultValue !== null ? `Por defecto: ${c.defaultValue}` : undefined}
+            />
+          ))}
+      </div>
+    )
+  }
+
   const renderTables = (db: string) => {
     const loaded = tables[db]
     if (!loaded || loaded.state === 'loading') return <Row depth={2} kind="folder" label="Cargando…" />
     if (loaded.state === 'error') return <div className="tree-error">{loaded.message}</div>
     const visible = needle ? loaded.value.filter((t) => tableLabel(t).toLowerCase().includes(needle)) : loaded.value
     if (visible.length === 0) return <Row depth={2} kind="folder" label={needle ? 'Sin coincidencias' : 'Sin tablas'} />
-    return visible.map((t) => {
-      const key = tableKey(db, t)
+    // Sin vistas, lista plana; con vistas, una carpeta para tablas y otra para vistas.
+    if (!loaded.value.some((t) => t.kind === 'view')) return visible.map((t) => renderObject(db, t, 2))
+    const groups = [
+      { kind: 'table' as const, label: 'Tablas' },
+      { kind: 'view' as const, label: 'Vistas' }
+    ]
+    return groups.map(({ kind, label }) => {
+      const items = visible.filter((t) => t.kind === kind)
+      // Al filtrar se ocultan las carpetas sin coincidencias.
+      if (needle && items.length === 0) return null
+      const key = groupKey(db, kind)
       const open = expanded.has(key)
-      const cols = columns[key]
       return (
         <div key={key}>
-          <Row
-            depth={2}
-            kind={t.kind}
-            label={tableLabel(t)}
-            expanded={open}
-            title="Doble clic: abrir la tabla"
-            active={activeTable?.database === db && activeTable.table === t.name && (activeTable.schema ?? null) === (t.schema ?? null)}
-            onClick={() => toggle(key, () => cols?.state !== 'ready' && void loadColumns(db, t))}
-            onDoubleClick={() => onOpenTable(db, t)}
-          />
-          {open && cols?.state === 'loading' && <Row depth={3} kind="folder" label="Cargando…" />}
-          {open && cols?.state === 'error' && <div className="tree-error">{cols.message}</div>}
-          {open &&
-            cols?.state === 'ready' &&
-            cols.value.map((c) => (
-              <Row
-                key={c.name}
-                depth={3}
-                kind={c.isPrimaryKey ? 'pk' : 'col'}
-                label={c.name}
-                meta={`${c.dataType}${c.nullable ? '' : ' not null'}`}
-                title={c.defaultValue !== null ? `Por defecto: ${c.defaultValue}` : undefined}
-              />
-            ))}
+          <Row depth={2} kind="folder" label={label} meta={String(items.length)} expanded={open} onClick={() => toggle(key)} />
+          {open && (items.length > 0 ? items.map((t) => renderObject(db, t, 3)) : <Row depth={3} kind="folder" label={`Sin ${label.toLowerCase()}`} />)}
         </div>
       )
     })
