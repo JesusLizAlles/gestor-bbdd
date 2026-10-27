@@ -11,6 +11,7 @@ import type {
   TableRef
 } from '@shared/types'
 import type { ParamStatement } from '@shared/table-query'
+import { COMPLETION_COLUMN_LIMIT } from '@shared/completion'
 import { groupBy } from './group'
 import { unwrapParens } from '@shared/table-ddl'
 import { DdlError, friendlyDbError } from './errors'
@@ -95,13 +96,7 @@ export class MssqlDriver implements DbDriver {
                 ELSE '' END AS dataType,
               c.IS_NULLABLE AS nullable,
               c.COLUMN_DEFAULT AS def,
-              CASE WHEN EXISTS (
-                SELECT 1 FROM ${db}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
-                  JOIN ${db}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE k
-                    ON k.CONSTRAINT_NAME = tc.CONSTRAINT_NAME AND k.TABLE_SCHEMA = tc.TABLE_SCHEMA
-                 WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY' AND tc.TABLE_SCHEMA = c.TABLE_SCHEMA
-                   AND tc.TABLE_NAME = c.TABLE_NAME AND k.COLUMN_NAME = c.COLUMN_NAME
-              ) THEN 1 ELSE 0 END AS pk,
+              CASE WHEN pkc.column_id IS NULL THEN 0 ELSE 1 END AS pk,
               COLUMNPROPERTY(OBJECT_ID(@obj), c.COLUMN_NAME, 'IsIdentity') AS ident,
               c.COLLATION_NAME AS collation,
               dc.name AS defName,
@@ -111,6 +106,13 @@ export class MssqlDriver implements DbDriver {
          LEFT JOIN ${db}.sys.columns sc ON sc.object_id = OBJECT_ID(@obj) AND sc.name = c.COLUMN_NAME
          LEFT JOIN ${db}.sys.default_constraints dc ON dc.object_id = sc.default_object_id
          LEFT JOIN ${db}.sys.computed_columns cc ON cc.object_id = sc.object_id AND cc.column_id = sc.column_id
+         -- La clave primaria sale de sys.indexes: KEY_COLUMN_USAGE recorre todas las restricciones de la
+         -- base de datos y, evaluada por columna, tardaba segundos en bases con miles de tablas.
+         LEFT JOIN (
+           SELECT ic.column_id FROM ${db}.sys.indexes i
+             JOIN ${db}.sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            WHERE i.object_id = OBJECT_ID(@obj) AND i.is_primary_key = 1
+         ) pkc ON pkc.column_id = sc.column_id
         WHERE c.TABLE_SCHEMA = @schema AND c.TABLE_NAME = @table
         ORDER BY c.ORDINAL_POSITION`,
       { schema: schema ?? 'dbo', table, obj: objectName(database, schema, table) }
@@ -131,7 +133,7 @@ export class MssqlDriver implements DbDriver {
 
   async completionColumns(database: string): Promise<CompletionColumn[]> {
     const rows = await this.metaRows<{ s: string; t: string; c: string; d: string }>(
-      `SELECT TOP 20000 TABLE_SCHEMA AS s, TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS d
+      `SELECT TOP ${COMPLETION_COLUMN_LIMIT} TABLE_SCHEMA AS s, TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS d
          FROM ${quoteIdent(database)}.INFORMATION_SCHEMA.COLUMNS ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION`
     )
     return rows.map((r) => ({ schema: r.s, table: r.t, column: r.c, dataType: r.d }))

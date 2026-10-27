@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { completionColumns } from '@shared/completion'
 import { splitStatements, statementAt } from '@shared/sql'
 import type { ConnectionSummary, ConsoleState, QueryResult } from '@shared/types'
 import { DEFAULT_MAX_ROWS } from '@shared/types'
@@ -50,7 +51,18 @@ function loadCompletion(sessionId: string, database: string, engine: CompletionS
   let load = completionCache.get(key)
   if (!load) {
     load = Promise.all([window.api.listTables(sessionId, database), window.api.completionColumns(sessionId, database)]).then(
-      ([tables, columns]) => ({ engine, tables, columns })
+      ([tables, initial]) => ({
+        engine,
+        tables,
+        ...completionColumns(tables, initial, async (t) =>
+          (await window.api.listColumns(sessionId, database, t.name, t.schema)).map((c) => ({
+            schema: t.schema,
+            table: t.name,
+            column: c.name,
+            dataType: c.dataType
+          }))
+        )
+      })
     )
     load.catch(() => completionCache.delete(key))
     completionCache.set(key, load)

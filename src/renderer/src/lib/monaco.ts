@@ -23,6 +23,8 @@ export interface CompletionSource {
   engine: Engine
   tables: { name: string; schema: string | null }[]
   columns: CompletionColumn[]
+  /** Añade a `columns` las de estas tablas si aún no están (la carga inicial puede venir recortada). */
+  ensureColumns(tables: string[]): Promise<void>
 }
 
 let completionSource: CompletionSource | null = null
@@ -47,13 +49,15 @@ export function registerCompletion(): void {
   for (const language of ['mysql', 'sql']) {
     monaco.languages.registerCompletionItemProvider(language, {
       triggerCharacters: ['.'],
-      provideCompletionItems(model, position) {
+      async provideCompletionItems(model, position) {
         const source = completionSource
         if (!source) return { suggestions: [] }
         const word = model.getWordUntilPosition(position)
         const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn)
         const before = model.getLineContent(position.lineNumber).slice(0, word.startColumn - 1)
         const aliases = tableAliases(model.getValue())
+        const qualifier = /([\w$#]+)\s*\.\s*$/.exec(before)?.[1]?.toLowerCase()
+        await source.ensureColumns(qualifier ? [aliases.get(qualifier) ?? qualifier] : [...aliases.values()])
         const K = monaco.languages.CompletionItemKind
         const tableSuggestion = (t: CompletionSource['tables'][number], sort: string) => ({
           label: t.name,
@@ -65,7 +69,6 @@ export function registerCompletion(): void {
         })
 
         // Tras "alias." o "tabla." → columnas de esa tabla; tras "esquema." → sus tablas.
-        const qualifier = /([\w$#]+)\s*\.\s*$/.exec(before)?.[1]?.toLowerCase()
         if (qualifier) {
           const table = (aliases.get(qualifier) ?? qualifier).toLowerCase()
           const cols = source.columns.filter((c) => c.table.toLowerCase() === table)

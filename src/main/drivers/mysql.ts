@@ -10,6 +10,7 @@ import type {
   TableRef
 } from '@shared/types'
 import type { ParamStatement } from '@shared/table-query'
+import { COMPLETION_COLUMN_LIMIT } from '@shared/completion'
 import { groupBy } from './group'
 import { DdlError, friendlyDbError } from './errors'
 import type { DbDriver, DriverConnectOptions, ExecuteOptions } from './types'
@@ -152,7 +153,7 @@ export class MysqlDriver implements DbDriver {
   async completionColumns(database: string): Promise<CompletionColumn[]> {
     const rows = await this.metaRows<{ t: string; c: string; d: string }>(
       `SELECT TABLE_NAME AS t, COLUMN_NAME AS c, DATA_TYPE AS d FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT 20000`,
+        WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME, ORDINAL_POSITION LIMIT ${COMPLETION_COLUMN_LIMIT}`,
       [database]
     )
     return rows.map((r) => ({ schema: null, table: r.t, column: r.c, dataType: String(r.d) }))
