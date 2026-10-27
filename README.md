@@ -128,6 +128,19 @@ La app de macOS tampoco va firmada con un certificado Developer ID ni notarizada
 1. Abre el `.dmg` y arrastra Gestor BBDD a Aplicaciones.
 2. Ábrela. macOS la bloqueará la primera vez.
 3. Ve a **Ajustes del Sistema → Privacidad y seguridad** y pulsa **«Abrir igualmente»**. Otra opción es ejecutar `xattr -cr "/Applications/Gestor BBDD.app"` en el Terminal.
+4. La primera vez que guarde una contraseña, macOS pedirá permiso para usar el llavero: pulsa **«Permitir siempre»**.
+
+### Firma de macOS con certificado propio
+
+Con la firma ad-hoc, la identidad de la app es la huella del binario, que cambia en cada versión. Por eso, tras cada actualización, macOS la trata como otra app y el llavero vuelve a pedir la contraseña para leer las claves guardadas. Si el repositorio tiene un certificado autofirmado, el flujo vuelve a firmar la app con él (`scripts/firmar-mac.mjs`) y la identidad pasa a ser la misma en todas las versiones. El aviso de Gatekeeper al instalar desde el `.dmg` no cambia: para quitarlo hace falta un certificado Developer ID de Apple y notarizar la app.
+
+Para configurarlo, una sola vez:
+
+```bash
+bash scripts/crear-certificado-mac.sh ~/gestor-bbdd-certificado
+```
+
+Después se crean en GitHub → Settings → Secrets and variables → Actions los secretos `MAC_CERT_P12` (el contenido del fichero `.p12.base64`) y `MAC_CERT_PASSWORD`, con los valores que imprime el script. Hay que guardar el `.p12` y su contraseña fuera del repositorio: si se pierden y se crea otro certificado, la identidad vuelve a cambiar una vez. Sin los secretos, el flujo sigue firmando ad-hoc.
 
 ## Actualizaciones automáticas
 
@@ -141,7 +154,7 @@ La app usa [electron-updater](https://www.electron.build/auto-update) y busca ve
   4. Se instala al pulsar «Reiniciar ahora», o al cerrar la app.
 - **Windows**: el instalador se ejecuta en silencio, conserva la carpeta de instalación y vuelve a abrir la app.
 - **Linux**: funciona con el **AppImage**, que se sustituye a sí mismo. Tiene que estar en una carpeta donde el usuario pueda escribir.
-- **macOS**: solo avisa. Sin firma Developer ID, Squirrel.Mac rechaza instalar la versión nueva, así que «Descargar en el navegador» abre el `.dmg` de la arquitectura del equipo. Se instala como la primera vez, incluida la autorización en Privacidad y seguridad.
+- **macOS**: solo avisa. Sin firma Developer ID, Squirrel.Mac rechaza instalar la versión nueva, así que «Descargar en el navegador» abre el `.dmg` de la arquitectura del equipo. Se instala como la primera vez, incluida la autorización en Privacidad y seguridad. Si la app va firmada con el certificado propio, el llavero no vuelve a pedir permiso.
 - **Sin firma de código**: la integridad de la descarga se comprueba con la huella SHA-512 de `latest.yml`. Si en el futuro se firma el instalador de Windows, electron-updater exigirá además que la versión nueva esté firmada por el mismo editor.
 - **Registro**: lo que hace el actualizador queda en `logs/updater.log`, dentro de la carpeta de datos de la app.
 

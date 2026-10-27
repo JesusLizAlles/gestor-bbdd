@@ -12,6 +12,8 @@ files:
   - resources/icon.png
   - '!**/*.map'
 asarUnpack: []
+# Firma de macOS con certificado propio; en el resto de sistemas no hace nada.
+afterSign: ./scripts/firmar-mac.mjs
 # Sin módulos nativos obligatorios (ssh2 funciona en JS puro): no recompilar nada.
 npmRebuild: false
 # Actualizaciones automáticas (electron-updater): la app busca versiones en las Releases
@@ -38,6 +40,8 @@ mac:
   # Sin certificado Developer ID: firma ad-hoc, sin la que Apple Silicon da la app por dañada.
   # Gatekeeper pide autorizarla a mano la primera vez, y Squirrel.Mac no puede instalar
   # actualizaciones: la app avisa y abre el .dmg nuevo en el navegador.
+  # Si hay certificado propio (MAC_CERT_P12), afterSign la vuelve a firmar con él para que su
+  # identidad no cambie entre versiones y el llavero no pida la contraseña tras cada actualización.
   identity: '-'
   # El runtime endurecido solo sirve para notarizar; con firma ad-hoc impediría cargar Electron.
   hardenedRuntime: false
