@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { appendFile, mkdir, stat, truncate } from 'node:fs/promises'
-import { app, BrowserWindow, Menu, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, Menu, safeStorage, screen, shell } from 'electron'
 import electronUpdater from 'electron-updater'
 import { UPDATE_STATE_EVENT } from '@shared/ipc'
 import { createDriver } from './drivers'
@@ -12,6 +12,7 @@ import { ConnectionStore } from './store/connections'
 import { ConsoleStore } from './store/consoles'
 import { HistoryStore } from './store/history'
 import { SecretVault, type SecretCipher } from './store/secrets'
+import { placeWindow, WindowStateStore } from './store/window-state'
 import { Updater, type UpdaterBackend } from './updater'
 import icon from '../../resources/icon.png?asset'
 
@@ -88,12 +89,21 @@ function applicationMenu(): Menu | null {
   return Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }])
 }
 
-function createWindow(): BrowserWindow {
-  const win = new BrowserWindow({
+function createWindow(windowState: WindowStateStore): BrowserWindow {
+  const primary = screen.getPrimaryDisplay()
+  const workAreas = [primary, ...screen.getAllDisplays().filter((d) => d.id !== primary.id)].map((d) => d.workArea)
+  const minWidth = 900
+  const minHeight = 600
+  const { maximized, fullScreen, ...bounds } = placeWindow(windowState.load(), workAreas, {
     width: 1400,
     height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth,
+    minHeight
+  })
+  const win = new BrowserWindow({
+    ...bounds,
+    minWidth,
+    minHeight,
     show: false,
     title: 'Gestor BBDD',
     backgroundColor: '#1e1f22',
@@ -110,7 +120,19 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    if (fullScreen) win.setFullScreen(true)
+    else if (maximized) win.maximize()
+    win.show()
+  })
+  // Al cerrar se recuerda el tamaño sin maximizar (getNormalBounds) y el estado aparte.
+  win.on('close', () => {
+    try {
+      windowState.save({ bounds: win.getNormalBounds(), maximized: win.isMaximized(), fullScreen: win.isFullScreen() })
+    } catch {
+      // No poder guardarlo no debe impedir cerrar.
+    }
+  })
 
   // La interfaz nunca navega fuera de la app; los enlaces externos se abren en el navegador.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -146,6 +168,7 @@ app.whenReady().then(() => {
   const store = new ConnectionStore(dataDir, vault)
   const history = new HistoryStore(dataDir)
   const consoles = new ConsoleStore(dataDir)
+  const windowState = new WindowStateStore(dataDir)
   const sessions = new SessionManager({ createDriver, knownHosts: new KnownHosts(dataDir), history })
   const { backend, reason, manualDownload } = updaterBackend()
   const updater = new Updater({
@@ -159,7 +182,7 @@ app.whenReady().then(() => {
 
   registerIpc({ store, vault, sessions, history, consoles, updater, window: () => mainWindow })
   const openWindow = () => {
-    mainWindow = createWindow()
+    mainWindow = createWindow(windowState)
     mainWindow.on('closed', () => {
       mainWindow = null
       void sessions.closeAll()
