@@ -140,6 +140,10 @@ jobs:
 
       - name: Generar el paquete
         run: npm run ${{ matrix.script }} -- --publish never
+        env:
+          # Certificado autofirmado de macOS (scripts/firmar-mac.mjs). Sin él, firma ad-hoc.
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
