@@ -57,6 +57,18 @@ export function buildPageQuery(engine: Engine, ref: TableRef, o: PageQueryOption
   return engine === 'mysql' ? `${base} LIMIT ${fetch} OFFSET ${offset}` : `${base} OFFSET ${offset} ROWS FETCH NEXT ${fetch} ROWS ONLY`
 }
 
+/**
+ * SELECT de partida para la consola, con las columnas escritas una por línea (como «Select Top
+ * 1000 Rows» de SSMS): así se ve qué campos tiene la tabla, también al copiarla a otro sitio.
+ */
+export function buildSelectColumns(engine: Engine, ref: TableRef, columns: string[], limit = 1000): string {
+  const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
+  const list = columns.length ? columns.map((c) => `  ${quoteIdent(c, engine)}`).join(',\n') : '  *'
+  return engine === 'mysql'
+    ? `SELECT\n${list}\nFROM ${from}\nLIMIT ${limit}`
+    : `SELECT TOP (${limit})\n${list}\nFROM ${from}`
+}
+
 export function buildCountQuery(engine: Engine, ref: TableRef, where: string | null): string {
   const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
   return `SELECT COUNT(*) AS total FROM ${from}${whereClause(where)}`

@@ -301,7 +301,7 @@ export function App() {
                       onOpenTable={(database, t: TableInfo) =>
                         openTable(session.info.sessionId, { database, schema: t.schema, table: t.name }, t.kind)
                       }
-                      onOpenConsole={(database) => openConsole(session.info.sessionId, database)}
+                      onOpenConsole={(database, sql) => openConsole(session.info.sessionId, database, sql)}
                     />
                   </div>
                 )}

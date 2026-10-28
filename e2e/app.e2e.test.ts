@@ -2,6 +2,8 @@
 // Requiere `npm run build` y un MySQL/MariaDB de pruebas (crea y borra la base de datos gestor_e2e):
 //   TEST_MYSQL_HOST, TEST_MYSQL_PORT, TEST_MYSQL_USER, TEST_MYSQL_PASSWORD
 // E2E_SCREENSHOTS=/ruta guarda capturas de cada paso.
+// E2E_RENDERER_URL=http://localhost:5173 usa la interfaz de `npm run dev` (React en desarrollo, con
+// StrictMode montando dos veces) en vez de la compilada.
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -75,7 +77,7 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     app = await electron.launch({
       args: ['.', `--user-data-dir=${userData}`, '--password-store=basic'],
       cwd: process.cwd(),
-      env: { ...process.env, ELECTRON_RENDERER_URL: '' }
+      env: { ...process.env, ELECTRON_RENDERER_URL: env.E2E_RENDERER_URL ?? '' }
     })
     page = await app.firstWindow()
     await page.setViewportSize({ width: 1400, height: 860 })
@@ -346,7 +348,7 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await shot('11-consola-resultados')
   })
 
-  it('«Consola» en una tabla añade su SELECT al final de la consola de esa base de datos y lo ejecuta', async () => {
+  it('«Consola» en una tabla añade un SELECT con sus columnas al final de la consola de esa base de datos y lo ejecuta', async () => {
     await tab('reservas').click()
     await view().getByRole('tab', { name: 'Datos' }).click()
     await view().getByRole('button', { name: 'Consola', exact: true }).click()
@@ -354,19 +356,23 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await expect.poll(() => consoleTab().count()).toBe(1)
     await expect(consoleTab().getAttribute('aria-selected')).resolves.toBe('true')
     await view().locator('.view-line', { hasText: 'r.importe > 1000' }).waitFor()
-    await view().locator('.view-line', { hasText: 'SELECT * FROM' }).waitFor()
+    // Las columnas escritas una a una, como «Select Top 1000 Rows» de SSMS.
+    await view().locator('.view-line', { hasText: '`cliente_id`,' }).waitFor()
+    await view().locator('.view-line', { hasText: 'FROM `gestor_e2e`.`reservas`' }).waitFor()
     await view().getByRole('button', { name: '▶ Ejecutar' }).click()
     await view().locator('.result-tab', { hasText: 'Resultado 1 (5)' }).waitFor()
   })
 
   it('el historial de la consola (Ctrl+Alt+E) busca e inserta consultas anteriores', async () => {
-    // Seguimos en la consola, que acaba de ejecutar el SELECT de reservas.
+    // Seguimos en la consola, que acaba de ejecutar el SELECT de reservas. El historial inserta
+    // en el cursor: al final, para no caer dentro del SELECT de varias líneas.
     await view().locator('.monaco-editor').click()
+    await page.keyboard.press('Control+End')
     await page.keyboard.press('Control+Alt+e')
     const panel = view().getByRole('complementary', { name: 'Historial de consultas' })
     await panel.waitFor()
     // Las dos consolas comparten conexión y por tanto historial; la más reciente, primero.
-    await expect(panel.locator('.history-item').first().innerText()).resolves.toContain('SELECT * FROM `gestor_e2e`.`reservas`')
+    await expect(panel.locator('.history-item').first().innerText()).resolves.toContain('FROM `gestor_e2e`.`reservas`')
     await panel.locator('.history-item', { hasText: 'r.importe > 1000' }).locator('.history-meta', { hasText: '3 filas' }).waitFor()
     await panel.getByLabel('Buscar en el historial').fill('importe > 1000')
     await expect.poll(() => panel.locator('.history-item').count()).toBe(1)
@@ -389,8 +395,42 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     const dbRow = page.locator('.tree-row', { hasText: DB })
     await dbRow.hover()
     await dbRow.getByTitle(`Consola SQL de ${DB}`).click()
-    await view().locator('.view-line', { hasText: 'SELECT * FROM' }).waitFor()
+    await view().locator('.view-line', { hasText: 'FROM `gestor_e2e`.`reservas`' }).waitFor()
     await view().locator('.view-line', { hasText: 'r.importe > 1000' }).first().waitFor()
+  })
+
+  it('el clic derecho en una tabla del explorador copia o abre en la consola un SELECT con sus columnas', async () => {
+    const tableRow = page.locator('.tree-row', { hasText: 'clientes' })
+    await tableRow.click({ button: 'right' })
+    const menu = page.getByRole('menu')
+    await shot('16-menu-contextual-tabla')
+    await menu.getByRole('menuitem', { name: 'Copiar SELECT de todas las columnas' }).click()
+    await menu.getByText('SELECT copiado').waitFor()
+    await expect
+      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .toBe('SELECT\n  `id`,\n  `nombre`,\n  `email`,\n  `pais`\nFROM `gestor_e2e`.`clientes`\nLIMIT 1000')
+    await expect.poll(() => menu.count()).toBe(0)
+    // Escape cierra el menú sin hacer nada.
+    await tableRow.click({ button: 'right' })
+    await page.keyboard.press('Escape')
+    await expect.poll(() => menu.count()).toBe(0)
+    // Con una tabla delante y la consola abierta detrás: la consola pasa al frente con el SELECT a la vista.
+    await tab('clientes').click()
+    await tableRow.click({ button: 'right' })
+    await menu.getByRole('menuitem', { name: 'Consola con SELECT de todas las columnas' }).click()
+    await expect(consoleTab().getAttribute('aria-selected')).resolves.toBe('true')
+    await view().locator('.view-line', { hasText: 'FROM `gestor_e2e`.`clientes`' }).waitFor()
+    await shot('17-consola-desde-menu')
+    await view().getByRole('button', { name: '▶ Ejecutar' }).click()
+    // Las 5 de partida y la que añadió la prueba de filas nuevas.
+    await view().locator('.result-tab', { hasText: 'Resultado 1 (6)' }).waitFor()
+    // Con la consola cerrada: se abre con lo guardado y el SELECT nuevo al final, a la vista.
+    await consoleTab().getByTitle(/^Cerrar/).click()
+    await expect.poll(() => consoleTab().count()).toBe(0)
+    await page.locator('.tree-row', { hasText: 'eventos' }).click({ button: 'right' })
+    await menu.getByRole('menuitem', { name: 'Consola con SELECT de todas las columnas' }).click()
+    await view().locator('.view-line', { hasText: 'FROM `gestor_e2e`.`eventos`' }).waitFor()
+    await shot('18-consola-nueva-desde-menu')
   })
 
   it('el campo WHERE recuerda los filtros de cada tabla', async () => {

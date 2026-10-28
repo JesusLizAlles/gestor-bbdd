@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { qualifiedName, toCsv, toJson, toSqlInserts } from '@shared/format'
-import { equalsCondition } from '@shared/table-query'
+import { buildSelectColumns, equalsCondition } from '@shared/table-query'
 import type {
   CellValue,
   ConnectionSummary,
@@ -522,8 +522,13 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         )}
         <button
           className="compact"
-          title="Abrir una consola SQL sobre esta tabla"
-          onClick={() => onOpenConsole(ref.database, `SELECT * FROM ${qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })}`)}
+          title="Abrir una consola SQL con un SELECT de todas las columnas de esta tabla"
+          onClick={() =>
+            onOpenConsole(
+              ref.database,
+              buildSelectColumns(engine, ref, ready?.columns.map((c) => c.name) ?? page?.columns.map((c) => c.name) ?? [])
+            )
+          }
         >
           Consola
         </button>

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { buildSelectColumns } from '@shared/table-query'
 import type { ColumnInfo, Engine, SessionInfo, TableInfo } from '@shared/types'
 import { onSchemaChanged } from '../lib/schema-events'
+import { ContextMenu } from './ContextMenu'
 import { DatabasePicker } from './DatabasePicker'
 
 interface Props {
@@ -12,15 +14,15 @@ interface Props {
   /** Tabla de la pestaña activa, para resaltarla en el árbol. */
   activeTable: { database: string; schema: string | null; table: string } | null
   onOpenTable: (database: string, table: TableInfo) => void
-  /** Consola SQL de esa base de datos (la guardada, si la hay). */
-  onOpenConsole: (database: string) => void
+  /** Consola SQL de esa base de datos (la guardada, si la hay); `sql` se añade al final. */
+  onOpenConsole: (database: string, sql?: string) => void
 }
 
 type Loadable<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string }
 
 const tableKey = (db: string, t: TableInfo) => `${db}\u0000${t.schema ?? ''}\u0000${t.name}`
 const groupKey = (db: string, kind: TableInfo['kind']) => `group:${kind}:${db}`
-const tableLabel =(t: TableInfo) => (t.schema && t.schema !== 'dbo' ? `${t.schema}.${t.name}` : t.name)
+const tableLabel = (t: TableInfo) => (t.schema && t.schema !== 'dbo' ? `${t.schema}.${t.name}` : t.name)
 
 function Row(props: {
   depth: number
@@ -32,6 +34,7 @@ function Row(props: {
   title?: string
   onClick?: () => void
   onDoubleClick?: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
   /** Botones que aparecen al pasar el ratón. */
   actions?: ReactNode
 }) {
@@ -43,6 +46,7 @@ function Row(props: {
       title={props.title}
       onClick={props.onClick}
       onDoubleClick={props.onDoubleClick}
+      onContextMenu={props.onContextMenu}
     >
       <span className="twisty">{props.expanded === undefined ? '' : props.expanded ? '▾' : '▸'}</span>
       {props.kind !== 'folder' && <span className={`kind kind-${props.kind}`}>{icon}</span>}
@@ -66,6 +70,8 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
   const [picking, setPicking] = useState(false)
   const pickerButton = useRef<HTMLButtonElement>(null)
   const closePicker = useCallback(() => setPicking(false), [])
+  const [menu, setMenu] = useState<{ x: number; y: number; db: string; table: TableInfo } | null>(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
 
   const loadDatabases = useCallback(async () => {
     setDatabases({ state: 'loading' })
@@ -102,6 +108,19 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
       setColumns((c) => ({ ...c, [key]: { state: 'error', message: (err as Error).message } }))
     }
   }
+
+  /** Columnas de una tabla para el SELECT del menú: las ya cargadas en el árbol o, si no, se piden. */
+  const columnNames = async (db: string, table: TableInfo): Promise<string[]> => {
+    const key = tableKey(db, table)
+    const loaded = columns[key]
+    if (loaded?.state === 'ready') return loaded.value.map((c) => c.name)
+    const value = await window.api.listColumns(session.sessionId, db, table.name, table.schema)
+    setColumns((c) => ({ ...c, [key]: { state: 'ready', value } }))
+    return value.map((c) => c.name)
+  }
+
+  const selectSql = async (db: string, table: TableInfo) =>
+    buildSelectColumns(engine, { database: db, schema: table.schema, table: table.name }, await columnNames(db, table))
 
   // Tras cambiar la estructura de una tabla, las columnas de esa base de datos se vuelven a leer.
   const latest = useRef({ tables, expanded, loadColumns })
@@ -152,10 +171,14 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
           kind={t.kind}
           label={tableLabel(t)}
           expanded={open}
-          title={t.kind === 'view' ? 'Doble clic: abrir la vista' : 'Doble clic: abrir la tabla'}
+          title={t.kind === 'view' ? 'Doble clic: abrir la vista · clic derecho: más opciones' : 'Doble clic: abrir la tabla · clic derecho: más opciones'}
           active={activeTable?.database === db && activeTable.table === t.name && (activeTable.schema ?? null) === (t.schema ?? null)}
           onClick={() => toggle(key, () => cols?.state !== 'ready' && void loadColumns(db, t))}
           onDoubleClick={() => onOpenTable(db, t)}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            setMenu({ x: e.clientX, y: e.clientY, db, table: t })
+          }}
         />
         {open && cols?.state === 'loading' && <Row depth={depth + 1} kind="folder" label="Cargando…" />}
         {open && cols?.state === 'error' && <div className="tree-error">{cols.message}</div>}
@@ -227,6 +250,34 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
           onChange={onVisibleDatabasesChange}
           anchor={pickerButton.current}
           onClose={closePicker}
+        />
+      )}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={closeMenu}
+          items={[
+            { label: menu.table.kind === 'view' ? 'Abrir la vista' : 'Abrir la tabla', onSelect: () => onOpenTable(menu.db, menu.table) },
+            {
+              label: 'Consola con SELECT de todas las columnas',
+              onSelect: async () => onOpenConsole(menu.db, await selectSql(menu.db, menu.table))
+            },
+            {
+              label: 'Copiar SELECT de todas las columnas',
+              onSelect: async () => {
+                await navigator.clipboard.writeText(await selectSql(menu.db, menu.table))
+                return 'SELECT copiado'
+              }
+            },
+            {
+              label: 'Copiar el nombre',
+              onSelect: async () => {
+                await navigator.clipboard.writeText(tableLabel(menu.table))
+                return 'Nombre copiado'
+              }
+            }
+          ]}
         />
       )}
       {databases.state === 'loading' && <Row depth={1} kind="folder" label="Cargando…" />}

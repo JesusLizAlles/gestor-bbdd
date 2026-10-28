@@ -4,6 +4,7 @@ import {
   buildDelete,
   buildInsert,
   buildPageQuery,
+  buildSelectColumns,
   buildUpdate,
   equalsCondition,
   mssqlDateParam,
@@ -56,6 +57,25 @@ describe('buildPageQuery', () => {
     expect(buildPageQuery('mysql', my, { where: null, sort: [], fallbackOrder: [], offset: -5.7, limit: 0 })).toBe(
       'SELECT * FROM `hotel`.`reservas` LIMIT 2 OFFSET 0'
     )
+  })
+})
+
+describe('buildSelectColumns', () => {
+  it('SQL Server: TOP (1000) y una columna por línea, con espacios y $ en los nombres', () => {
+    const ref = { database: 'SUASOR', schema: 'dbo', table: 'MANTOLAN$Asignacion Servicio' }
+    expect(buildSelectColumns('mssql', ref, ['timestamp', 'Cod_ Cliente', 'Fecha]alta'])).toBe(
+      'SELECT TOP (1000)\n  [timestamp],\n  [Cod_ Cliente],\n  [Fecha]]alta]\nFROM [SUASOR].[dbo].[MANTOLAN$Asignacion Servicio]'
+    )
+  })
+
+  it('MySQL: LIMIT al final', () => {
+    expect(buildSelectColumns('mysql', my, ['id', 'fecha entrada'])).toBe(
+      'SELECT\n  `id`,\n  `fecha entrada`\nFROM `hotel`.`reservas`\nLIMIT 1000'
+    )
+  })
+
+  it('sin columnas conocidas, SELECT *', () => {
+    expect(buildSelectColumns('mssql', ms, [])).toBe('SELECT TOP (1000)\n  *\nFROM [SAGE].[dbo].[Clientes]')
   })
 })
 
