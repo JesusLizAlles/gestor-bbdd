@@ -44,6 +44,11 @@ export function SqlEditor({ engine, initialValue, initialView, onStateChange, co
   const latest = useRef({ onStateChange, commands })
   latest.current = { onStateChange, commands }
   const runRef = useRef<(all: boolean) => void>(() => {})
+  /**
+   * Estado del editor al destruirlo. Si el mismo componente lo vuelve a crear (StrictMode lo hace
+   * en desarrollo), parte de ahí y no del texto inicial, que ya no incluiría lo añadido después.
+   */
+  const kept = useRef<EditorState | null>(null)
 
   useImperativeHandle(ref, () => ({
     appendStatement(statement) {
@@ -83,8 +88,10 @@ export function SqlEditor({ engine, initialValue, initialView, onStateChange, co
 
   useEffect(() => {
     registerCompletion()
+    const start = kept.current
+    const view = start ?? initialView
     const instance = monaco.editor.create(host.current!, {
-      value: initialValue,
+      value: start?.text ?? initialValue,
       language: languageFor(engine),
       theme: 'gestor-dark',
       automaticLayout: true,
@@ -126,10 +133,10 @@ export function SqlEditor({ engine, initialValue, initialView, onStateChange, co
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
       run: () => run(true)
     })
-    if (initialView) {
-      const { startLine, startColumn, endLine, endColumn } = initialView.selection
+    if (view) {
+      const { startLine, startColumn, endLine, endColumn } = view.selection
       instance.setSelection(new monaco.Selection(startLine, startColumn, endLine, endColumn))
-      instance.setScrollTop(initialView.scrollTop)
+      instance.setScrollTop(view.scrollTop)
     }
 
     // El texto se lee solo cuando cambia; mover el cursor o desplazarse reutiliza el último.
@@ -154,6 +161,14 @@ export function SqlEditor({ engine, initialValue, initialView, onStateChange, co
     instance.focus()
     return () => {
       for (const sub of subs) sub.dispose()
+      const s = instance.getSelection()
+      if (s) {
+        kept.current = {
+          text: instance.getValue(),
+          selection: { startLine: s.startLineNumber, startColumn: s.startColumn, endLine: s.endLineNumber, endColumn: s.endColumn },
+          scrollTop: instance.getScrollTop()
+        }
+      }
       instance.dispose()
       editor.current = null
     }
