@@ -118,11 +118,32 @@ input[type='checkbox'] {
 }
 .sidebar {
   grid-row: 1;
+  position: relative;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
+}
+/* Asa para redimensionar el panel lateral: centrada sobre su borde derecho. */
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.sidebar-resizer:hover,
+.col-resizing .sidebar-resizer {
+  background: var(--accent);
+}
+/* Mientras se arrastra, el cursor no cambia al pasar por encima de otros elementos. */
+.col-resizing,
+.col-resizing * {
+  cursor: col-resize !important;
 }
 .app-main {
   grid-row: 1;

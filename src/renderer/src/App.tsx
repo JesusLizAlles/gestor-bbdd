@@ -22,6 +22,17 @@ type Tab = OpenTable | OpenConsole
 const sameRef = (a: TableRef, b: TableRef) =>
   a.database === b.database && a.table === b.table && (a.schema ?? null) === (b.schema ?? null)
 
+const SIDEBAR_WIDTH = { default: 300, min: 180, max: 700 }
+
+function readSidebarWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem('sidebarWidth'))
+    return stored >= SIDEBAR_WIDTH.min && stored <= SIDEBAR_WIDTH.max ? stored : SIDEBAR_WIDTH.default
+  } catch {
+    return SIDEBAR_WIDTH.default
+  }
+}
+
 const tabLabel = (ref: TableRef) => (ref.schema && ref.schema !== 'dbo' ? `${ref.schema}.${ref.table}` : ref.table)
 
 export function App() {
@@ -38,6 +49,7 @@ export function App() {
   const [transfer, setTransfer] = useState<'export' | 'import' | null>(null)
   /** Conexiones abiertas con el árbol plegado (al conectar se despliega). */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const activeSession = activeTab ? sessions.find((s) => s.info.sessionId === activeTab.sessionId) : undefined
@@ -138,6 +150,41 @@ export function App() {
     setActiveTabId(id)
   }
 
+  /** Arrastrar el borde del panel lateral cambia su ancho; se recuerda al soltar. */
+  const startSidebarResize = (e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+    let width = startWidth
+    const max = Math.min(SIDEBAR_WIDTH.max, window.innerWidth - 300)
+    const move = (ev: MouseEvent) => {
+      width = Math.max(SIDEBAR_WIDTH.min, Math.min(max, startWidth + ev.clientX - startX))
+      setSidebarWidth(width)
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.classList.remove('col-resizing')
+      try {
+        localStorage.setItem('sidebarWidth', String(width))
+      } catch {
+        // Sin almacenamiento, el ancho solo dura esta sesión.
+      }
+    }
+    document.body.classList.add('col-resizing')
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  const resetSidebarWidth = () => {
+    setSidebarWidth(SIDEBAR_WIDTH.default)
+    try {
+      localStorage.removeItem('sidebarWidth')
+    } catch {
+      // Nada que olvidar.
+    }
+  }
+
   // Atajos globales de pestañas.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -158,8 +205,14 @@ export function App() {
   })
 
   return (
-    <div className="app">
+    <div className="app" style={{ gridTemplateColumns: `${sidebarWidth}px 1fr` }}>
       <aside className="sidebar">
+        <div
+          className="sidebar-resizer"
+          title="Arrastra para cambiar el ancho · doble clic para restablecerlo"
+          onMouseDown={startSidebarResize}
+          onDoubleClick={resetSidebarWidth}
+        />
         <div className="section-title">
           Conexiones
           <span className="section-actions">
