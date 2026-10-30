@@ -132,19 +132,24 @@ export function App() {
 
   /**
    * Abre (o enfoca, si ya está abierta) la consola de una base de datos, con lo que se escribió en
-   * ella la última vez. `sql` se añade al final. Sin base de datos, la de la conexión.
+   * ella la última vez. `sql` se añade al final. Sin base de datos, la de la conexión. Con `table`
+   * (un SELECT de esa tabla) se usa en su lugar la consola de tablas de esa base de datos, que no se
+   * guarda y lleva el nombre de la última tabla: así esos SELECT no se acumulan en la principal.
    */
-  const openConsole = (sessionId: string, database: string | null, sql = '') => {
+  const openConsole = (sessionId: string, database: string | null, sql = '', table?: TableRef) => {
     const session = sessions.find((s) => s.info.sessionId === sessionId)
     if (!session) return
     const home = database ?? session.connection.database ?? session.info.server.currentDatabase ?? null
-    const existing = tabs.find((t) => t.type === 'console' && t.sessionId === sessionId && t.homeDatabase === home)
+    const quick = table !== undefined
+    const title = table ? tabLabel(table) : (home ?? 'Consola')
+    const existing = tabs.find(
+      (t) => t.type === 'console' && t.sessionId === sessionId && t.homeDatabase === home && t.quick === quick
+    )
     const id = existing?.id ?? crypto.randomUUID()
     if (!existing) {
-      setTabs((list) => [
-        ...list,
-        { type: 'console', id, sessionId, connection: session.connection, title: home ?? 'Consola', homeDatabase: home }
-      ])
+      setTabs((list) => [...list, { type: 'console', id, sessionId, connection: session.connection, title, homeDatabase: home, quick }])
+    } else if (existing.type === 'console' && existing.title !== title) {
+      setTabs((list) => list.map((t) => (t.id === id ? { ...t, title } : t)))
     }
     if (sql) setSqlRequests((r) => ({ ...r, [id]: { sql, nonce: (r[id]?.nonce ?? 0) + 1 } }))
     setActiveTabId(id)
@@ -301,7 +306,8 @@ export function App() {
                       onOpenTable={(database, t: TableInfo) =>
                         openTable(session.info.sessionId, { database, schema: t.schema, table: t.name }, t.kind)
                       }
-                      onOpenConsole={(database, sql) => openConsole(session.info.sessionId, database, sql)}
+                      onOpenConsole={(database) => openConsole(session.info.sessionId, database)}
+                      onOpenQuickConsole={(ref, sql) => openConsole(session.info.sessionId, ref.database, sql, ref)}
                     />
                   </div>
                 )}
@@ -320,7 +326,13 @@ export function App() {
                 role="tab"
                 aria-selected={t.id === activeTabId}
                 className={`tab ${t.id === activeTabId ? 'active' : ''} env-tab-${t.connection.environment}`}
-                title={t.type === 'table' ? `${t.connection.name} · ${t.ref.database}.${tabLabel(t.ref)}` : `${t.connection.name} · ${t.title}`}
+                title={
+                  t.type === 'table'
+                    ? `${t.connection.name} · ${t.ref.database}.${tabLabel(t.ref)}`
+                    : t.quick
+                      ? `${t.connection.name} · ${t.homeDatabase} · consola de tablas (no se guarda)`
+                      : `${t.connection.name} · ${t.title}`
+                }
                 onClick={() => setActiveTabId(t.id)}
                 onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
               >
@@ -333,9 +345,9 @@ export function App() {
                   </>
                 ) : (
                   <>
-                    <span className="kind kind-console">⌨</span>
+                    <span className={`kind kind-console ${t.quick ? 'quick' : ''}`}>⌨</span>
                     {t.title}
-                    <span className="tab-db">{t.connection.name}</span>
+                    <span className="tab-db">{t.quick ? t.homeDatabase : t.connection.name}</span>
                   </>
                 )}
                 <button
@@ -362,6 +374,7 @@ export function App() {
               filterRequest={filterRequests[t.id] ?? null}
               onNavigate={(ref, where) => openTable(t.sessionId, ref, 'table', where || undefined)}
               onOpenConsole={(database, sql) => openConsole(t.sessionId, database, sql)}
+              onOpenQuickConsole={(ref, sql) => openConsole(t.sessionId, ref.database, sql, ref)}
             />
           ) : (
             <ConsoleView key={t.id} tab={t} active={t.id === activeTabId} sqlRequest={sqlRequests[t.id] ?? null} />

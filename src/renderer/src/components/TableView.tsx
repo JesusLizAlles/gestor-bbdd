@@ -39,8 +39,10 @@ interface Props {
   /** Filtro impuesto desde fuera (navegación por clave foránea); `nonce` distingue peticiones iguales. */
   filterRequest: { where: string; nonce: number } | null
   onNavigate: (ref: TableRef, where: string) => void
-  /** Abre una consola sobre esta base de datos con una consulta de partida. */
+  /** Abre la consola de esta base de datos con sentencias al final (las del editor de estructura). */
   onOpenConsole: (database: string, sql: string) => void
+  /** Abre la consola de tablas de esta base de datos, que no se guarda, con un SELECT de la tabla. */
+  onOpenQuickConsole: (ref: TableRef, sql: string) => void
 }
 
 function readPageSize(): number {
@@ -65,7 +67,7 @@ const hasChanges = (c: Changes): boolean => c.edits.size > 0 || c.newRows > 0 ||
 const tableLabel = (ref: TableRef) => (ref.schema && ref.schema !== 'dbo' ? `${ref.schema}.${ref.table}` : ref.table)
 
 /** Visor de una tabla al estilo DataGrip: los datos son la pantalla; la SQL se genera por detrás. */
-export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsole }: Props) {
+export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsole, onOpenQuickConsole }: Props) {
   const { sessionId, ref, connection } = tab
   const engine = connection.engine
   const [view, setView] = useState<'data' | 'structure'>('data')
@@ -522,10 +524,10 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
         )}
         <button
           className="compact"
-          title="Abrir una consola SQL con un SELECT de todas las columnas de esta tabla"
+          title="Abrir una consola aparte (no se guarda) con un SELECT de todas las columnas de esta tabla"
           onClick={() =>
-            onOpenConsole(
-              ref.database,
+            onOpenQuickConsole(
+              ref,
               buildSelectColumns(engine, ref, ready?.columns.map((c) => c.name) ?? page?.columns.map((c) => c.name) ?? [])
             )
           }

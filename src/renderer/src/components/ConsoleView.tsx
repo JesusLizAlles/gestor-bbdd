@@ -11,7 +11,10 @@ import { QueryHistoryPanel } from './QueryHistoryPanel'
 import { ResultsPanel } from './ResultsPanel'
 import { SqlEditor, type EditorCommands, type EditorState, type SqlEditorHandle } from './SqlEditor'
 
-/** Consola de una conexión y base de datos: hay una por pareja y lo escrito se guarda. */
+/**
+ * Consola de una conexión y base de datos. Hay dos por pareja: la principal, cuyo contenido se
+ * guarda, y otra para los SELECT de las tablas, que no se guarda ni se mezcla con la principal.
+ */
 export interface OpenConsole {
   type: 'console'
   id: string
@@ -20,6 +23,8 @@ export interface OpenConsole {
   title: string
   /** Base de datos para la que se abrió: identifica la consola guardada. */
   homeDatabase: string | null
+  /** Consola de los SELECT de tablas: se titula con la última, empieza vacía y no se guarda. */
+  quick: boolean
 }
 
 interface Props {
@@ -74,12 +79,12 @@ const DDL = /^\s*(CREATE|ALTER|DROP|RENAME|TRUNCATE)\b/i
 
 /** Consola SQL de una conexión, con la base de datos elegida en la barra de herramientas. */
 export function ConsoleView({ tab, active, sqlRequest }: Props) {
-  const { sessionId, connection, homeDatabase } = tab
+  const { sessionId, connection, homeDatabase, quick } = tab
   const engine = connection.engine
   const [databases, setDatabases] = useState<string[]>([])
   const [database, setDatabase] = useState<string | null>(homeDatabase)
-  /** Consola guardada: undefined mientras se lee; null si no había. */
-  const [saved, setSaved] = useState<ConsoleState | null | undefined>(undefined)
+  /** Consola guardada: undefined mientras se lee; null si no había (la de tablas nunca la tiene). */
+  const [saved, setSaved] = useState<ConsoleState | null | undefined>(quick ? null : undefined)
   const [results, setResults] = useState<QueryResult[]>([])
   const [running, setRunning] = useState(false)
   const [message, setMessage] = useState<{ kind: 'error' | 'info'; text: string } | null>(null)
@@ -108,6 +113,7 @@ export function ConsoleView({ tab, active, sqlRequest }: Props) {
   }, [active])
 
   useEffect(() => {
+    if (quick) return
     let cancelled = false
     window.api
       .loadConsole(connection.id, homeDatabase)
@@ -120,7 +126,7 @@ export function ConsoleView({ tab, active, sqlRequest }: Props) {
     return () => {
       cancelled = true
     }
-  }, [connection.id, homeDatabase])
+  }, [connection.id, homeDatabase, quick])
 
   // Guardado: el último estado del editor y un temporizador; flush() escribe si hay algo pendiente.
   const editorState = useRef<EditorState | null>(null)
@@ -136,6 +142,7 @@ export function ConsoleView({ tab, active, sqlRequest }: Props) {
     if (state) void window.api.saveConsole(connection.id, homeDatabase, { ...state, database: databaseRef.current }).catch(() => {})
   }
   const scheduleSave = () => {
+    if (quick) return
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => flush.current(), SAVE_DELAY_MS)
   }
@@ -323,6 +330,7 @@ export function ConsoleView({ tab, active, sqlRequest }: Props) {
           {completionState === 'loading' && 'Cargando tablas para el autocompletado… · '}
           {completionState === 'error' && 'No se pudo cargar el autocompletado · '}
           {!database && 'Elige una base de datos para autocompletar · '}
+          {quick && 'Esta consola no se guarda · '}
           <kbd>{keys('Ctrl')}</kbd>+<kbd>Enter</kbd> sentencia actual
         </span>
       </div>

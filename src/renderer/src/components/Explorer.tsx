@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { buildSelectColumns } from '@shared/table-query'
-import type { ColumnInfo, Engine, SessionInfo, TableInfo } from '@shared/types'
+import type { ColumnInfo, Engine, SessionInfo, TableInfo, TableRef } from '@shared/types'
 import { onSchemaChanged } from '../lib/schema-events'
 import { ContextMenu } from './ContextMenu'
 import { DatabasePicker } from './DatabasePicker'
@@ -14,8 +14,10 @@ interface Props {
   /** Tabla de la pestaña activa, para resaltarla en el árbol. */
   activeTable: { database: string; schema: string | null; table: string } | null
   onOpenTable: (database: string, table: TableInfo) => void
-  /** Consola SQL de esa base de datos (la guardada, si la hay); `sql` se añade al final. */
-  onOpenConsole: (database: string, sql?: string) => void
+  /** Consola SQL de esa base de datos (la guardada, si la hay). */
+  onOpenConsole: (database: string) => void
+  /** Consola de tablas de esa base de datos, que no se guarda; `sql` (un SELECT de `ref`) se añade al final. */
+  onOpenQuickConsole: (ref: TableRef, sql: string) => void
 }
 
 type Loadable<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state: 'error'; message: string }
@@ -61,7 +63,7 @@ function Row(props: {
  * Árbol de una sesión, colgado de su conexión en la lista: bases de datos → tablas/vistas →
  * columnas, cargado bajo demanda.
  */
-export function Explorer({ session, engine, visibleDatabases, onVisibleDatabasesChange, activeTable, onOpenTable, onOpenConsole }: Props) {
+export function Explorer({ session, engine, visibleDatabases, onVisibleDatabasesChange, activeTable, onOpenTable, onOpenConsole, onOpenQuickConsole }: Props) {
   const [databases, setDatabases] = useState<Loadable<string[]>>({ state: 'loading' })
   const [tables, setTables] = useState<Record<string, Loadable<TableInfo[]>>>({})
   const [columns, setColumns] = useState<Record<string, Loadable<ColumnInfo[]>>>({})
@@ -261,7 +263,11 @@ export function Explorer({ session, engine, visibleDatabases, onVisibleDatabases
             { label: menu.table.kind === 'view' ? 'Abrir la vista' : 'Abrir la tabla', onSelect: () => onOpenTable(menu.db, menu.table) },
             {
               label: 'Consola con SELECT de todas las columnas',
-              onSelect: async () => onOpenConsole(menu.db, await selectSql(menu.db, menu.table))
+              onSelect: async () =>
+                onOpenQuickConsole(
+                  { database: menu.db, schema: menu.table.schema, table: menu.table.name },
+                  await selectSql(menu.db, menu.table)
+                )
             },
             {
               label: 'Copiar SELECT de todas las columnas',

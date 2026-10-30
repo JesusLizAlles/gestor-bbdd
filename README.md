@@ -67,7 +67,8 @@ se genera por detrás.
   - Si la tabla ha cambiado desde que se cargó (otra persona, otra consola), no se aplica nada y se pide recargar.
   - En producción, el botón es «Aplicar en producción». No se edita en vistas ni en conexiones de solo lectura.
 - **Consola SQL** (botón ⌨ junto a la conexión o a una base de datos, o «Consola» desde una tabla):
-  - Una consola por conexión y base de datos. Lo escrito se guarda solo, con el cursor, la selección, el desplazamiento y la base elegida. Al volver a abrirla, también tras reiniciar la app, sigue donde se dejó. «Consola» desde una tabla añade su `SELECT` al final.
+  - Una consola por conexión y base de datos. Lo escrito se guarda solo, con el cursor, la selección, el desplazamiento y la base elegida. Al volver a abrirla, también tras reiniciar la app, sigue donde se dejó.
+  - «Consola» desde una tabla (o «Consola con SELECT de todas las columnas» en su clic derecho) abre una **consola aparte** de esa base de datos, con el nombre de la tabla, y añade el `SELECT` al final. Si ya estaba abierta, se reutiliza y pasa a llamarse como la última tabla. No se guarda: al cerrarla se pierde, y así no se mezcla con lo escrito en la principal. Lo que se ejecuta en ella sí entra en el historial de consultas.
   - Selector de base de datos. El autocompletado ofrece las tablas y columnas de la base elegida.
   - Entiende alias: tras `r.` en `FROM reservas r` solo sugiere columnas de `reservas`. Prioriza las columnas de las tablas que ya están en la consulta.
   - <kbd>Ctrl</kbd>+<kbd>Enter</kbd> ejecuta la sentencia bajo el cursor (o la selección); <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> ejecuta todo. Respeta `DELIMITER` (MySQL) y `GO` (SQL Server).

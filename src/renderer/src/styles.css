@@ -1347,6 +1347,10 @@ input[type='checkbox'].invalid {
 .kind-console {
   background: #8a6d3b;
 }
+/* Consola de tablas: mismo icono, en otro tono para no confundirla con la principal ni con una tabla. */
+.kind-console.quick {
+  background: #5b6b7d;
+}
 
 /* Edición en la rejilla */
 .grid-cell.modified {
