@@ -26,7 +26,15 @@ const PATHS = {
   /** Flecha que entra en una bandeja. */
   import: <path d="M8 2.5v7M5 6.5l3 3 3-3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />,
   /** Flecha que sale de una bandeja. */
-  export: <path d="M8 9.5v-7M5 5.5l3-3 3 3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />
+  export: <path d="M8 9.5v-7M5 5.5l3-3 3 3M3 10.5v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2" />,
+  /** Engranaje: ajustes. */
+  settings: (
+    <>
+      <circle cx="8" cy="8" r="2" />
+      <path d="M8 1.75v1.5M8 12.75v1.5M1.75 8h1.5M12.75 8h1.5M3.6 3.6l1.05 1.05M11.35 11.35l1.05 1.05M3.6 12.4l1.05-1.05M11.35 4.65l1.05-1.05" />
+      <circle cx="8" cy="8" r="4.25" />
+    </>
+  )
 }
 
 export type IconName = keyof typeof PATHS

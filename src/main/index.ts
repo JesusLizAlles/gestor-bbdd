@@ -3,9 +3,11 @@ import { join } from 'node:path'
 import { appendFile, mkdir, stat, truncate } from 'node:fs/promises'
 import { app, BrowserWindow, Menu, safeStorage, screen, shell } from 'electron'
 import electronUpdater from 'electron-updater'
-import { UPDATE_STATE_EVENT } from '@shared/ipc'
+import { MCP_APPROVAL_EVENT, MCP_STATE_EVENT, UPDATE_STATE_EVENT } from '@shared/ipc'
 import { createDriver } from './drivers'
 import { registerIpc } from './ipc'
+import { McpService } from './mcp/service'
+import { McpSettingsStore } from './mcp/settings'
 import { SessionManager } from './sessions'
 import { KnownHosts } from './ssh/known-hosts'
 import { ConnectionStore } from './store/connections'
@@ -180,7 +182,41 @@ app.whenReady().then(() => {
     log: updaterLog
   })
 
-  registerIpc({ store, vault, sessions, history, consoles, updater, window: () => mainWindow })
+  const mcpSettings = new McpSettingsStore(dataDir)
+  const mcp = new McpService({
+    settings: mcpSettings,
+    connections: { list: () => store.list(), secrets: (id) => vault.get(id) },
+    sessions,
+    version: app.getVersion(),
+    logPath: join(app.getPath('logs'), 'mcp.log'),
+    onState: (state) => mainWindow?.webContents.send(MCP_STATE_EVENT, state),
+    onApproval: (request) => {
+      const win = mainWindow
+      if (!win) return false
+      // El usuario puede estar en Claude: se le trae la ventana para que vea qué se quiere ejecutar.
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      win.flashFrame(true)
+      win.webContents.send(MCP_APPROVAL_EVENT, request)
+      return true
+    }
+  })
+  void mcp.init()
+
+  registerIpc({
+    store,
+    vault,
+    sessions,
+    history,
+    consoles,
+    updater,
+    mcp,
+    mcpSettings,
+    dataDir,
+    iconPath: icon,
+    window: () => mainWindow
+  })
   const openWindow = () => {
     mainWindow = createWindow(windowState)
     mainWindow.on('closed', () => {
@@ -196,6 +232,7 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow()
   })
   app.on('before-quit', () => {
+    void mcp.stop()
     void sessions.closeAll()
   })
   // Lo último escrito en las consolas puede seguir en vuelo: se termina de guardar antes de salir.

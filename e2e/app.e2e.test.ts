@@ -4,9 +4,12 @@
 // E2E_SCREENSHOTS=/ruta guarda capturas de cada paso.
 // E2E_RENDERER_URL=http://localhost:5173 usa la interfaz de `npm run dev` (React en desarrollo, con
 // StrictMode montando dos veces) en vez de la compilada.
+import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createServer, type AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 import mysql from 'mysql2/promise'
 import { _electron as electron, type ElectronApplication, type Page } from 'playwright-core'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
@@ -15,6 +18,44 @@ const env = process.env
 const enabled = Boolean(env.TEST_MYSQL_HOST && env.TEST_MYSQL_USER)
 const shots = env.E2E_SCREENSHOTS
 const DB = 'gestor_e2e'
+
+/** Puerto libre para el servidor MCP de la app. */
+function freePort(): Promise<number> {
+  return new Promise((resolve) => {
+    const server = createServer()
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as AddressInfo
+      server.close(() => resolve(port))
+    })
+  })
+}
+
+type McpResult = { content?: { text: string }[]; isError?: boolean } & Record<string, unknown>
+
+/** El puente de Claude Desktop, hablándole por stdin/stdout como lo hace Claude. */
+function startBridge(dataDir: string) {
+  const child = spawn(process.execPath, ['src/mcp-bridge/bridge.cjs'], {
+    env: { PATH: process.env.PATH ?? '', GESTOR_BBDD_DATA_DIR: dataDir },
+    stdio: ['pipe', 'pipe', 'inherit']
+  })
+  const waiting = new Map<number, (result: McpResult) => void>()
+  createInterface({ input: child.stdout }).on('line', (line) => {
+    const reply = JSON.parse(line)
+    waiting.get(reply.id)?.(reply.result)
+    waiting.delete(reply.id)
+  })
+  let nextId = 1
+  const send = (method: string, params: unknown = {}) => {
+    const id = nextId++
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
+    return new Promise<McpResult>((resolve) => waiting.set(id, resolve))
+  }
+  return {
+    send,
+    tool: (name: string, args: Record<string, unknown>) => send('tools/call', { name, arguments: args }),
+    close: () => child.stdin.end()
+  }
+}
 
 const SEED = `
   DROP DATABASE IF EXISTS ${DB};
@@ -585,6 +626,62 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     const [columns] = await admin.query(`SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '${DB}' AND TABLE_NAME = 'clientes'`)
     expect(columns).toEqual([{ n: 4 }])
     await view().getByRole('tab', { name: 'Datos' }).click()
+  })
+
+  it('servidor MCP: se activa en Ajustes y un agente consulta y, con aprobación, escribe', async () => {
+    await page.getByTitle('Ajustes (servidor MCP para agentes de IA)').click()
+    const settings = page.getByRole('dialog', { name: 'Ajustes' })
+    await settings.getByText('Parado').waitFor()
+    await settings.getByLabel('Activar el servidor MCP').check()
+    await settings.getByLabel('Puerto').fill(String(await freePort()))
+    await settings.getByLabel('Acceso del agente a MariaDB pruebas').selectOption('confirm')
+    await settings.getByRole('button', { name: 'Guardar' }).click()
+    await settings.locator('.badge.mcp-on', { hasText: 'En marcha' }).waitFor()
+    await settings.getByRole('button', { name: 'Cerrar' }).click()
+    await page.locator('.statusbar-mcp', { hasText: 'MCP activo' }).waitFor()
+
+    const bridge = startBridge(userData)
+    try {
+      const init = await bridge.send('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } })
+      expect(init).toMatchObject({ serverInfo: { name: 'gestor-bbdd' } })
+      const list = JSON.parse((await bridge.tool('list_connections', {})).content![0]!.text)
+      expect(list.connections).toMatchObject([{ name: 'MariaDB pruebas', access: 'confirm' }])
+
+      const read = await bridge.tool('run_query', { connection: 'MariaDB pruebas', database: DB, sql: 'SELECT COUNT(*) AS n FROM reservas' })
+      expect(read.isError).toBe(false)
+      expect(JSON.parse(read.content![0]!.text).results[0].rows).toEqual([[5]])
+      const sneaky = await bridge.tool('run_query', { connection: 'MariaDB pruebas', sql: `DROP TABLE ${DB}.reservas` })
+      expect(sneaky.isError).toBe(true)
+
+      // La escritura espera a que el usuario la apruebe en la app.
+      const create = bridge.tool('execute_sql', {
+        connection: 'MariaDB pruebas',
+        database: DB,
+        sql: "CREATE TABLE notas_agente (id INT PRIMARY KEY, texto VARCHAR(50)); INSERT INTO notas_agente VALUES (1, 'hola')"
+      })
+      const approval = page.getByRole('alertdialog', { name: 'Aprobar SQL del agente' })
+      await approval.getByText('INSERT INTO notas_agente').waitFor()
+      await shot('20-mcp-aprobacion')
+      await approval.getByRole('button', { name: 'Ejecutar' }).click()
+      expect((await create).isError).toBe(false)
+      const [rows] = await admin.query(`SELECT texto FROM ${DB}.notas_agente`)
+      expect(rows).toEqual([{ texto: 'hola' }])
+
+      const drop = bridge.tool('execute_sql', { connection: 'MariaDB pruebas', sql: `DROP TABLE ${DB}.notas_agente` })
+      await approval.getByText('DROP TABLE').waitFor()
+      await approval.getByRole('button', { name: 'Rechazar' }).click()
+      expect(await drop).toMatchObject({ isError: true })
+      const [tables] = await admin.query(`SHOW TABLES FROM ${DB} LIKE 'notas_agente'`)
+      expect(tables).toHaveLength(1)
+    } finally {
+      bridge.close()
+    }
+
+    await page.locator('.statusbar-mcp').click()
+    await settings.locator('.mcp-activity-row', { hasText: 'execute_sql' }).first().waitFor()
+    expect(await settings.locator('.mcp-activity-row.outcome-rejected').count()).toBe(1)
+    await shot('21-mcp-ajustes')
+    await settings.getByRole('button', { name: 'Cerrar' }).click()
   })
 
   it('cierra la pestaña activa con Ctrl+W', async () => {

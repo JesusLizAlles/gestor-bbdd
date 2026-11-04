@@ -163,7 +163,8 @@ export class SessionManager {
             durationMs: Math.round(performance.now() - startedAll),
             statements: statements.length,
             rowCount,
-            ...(error ? { error } : {})
+            ...(error ? { error } : {}),
+            ...(input.source ? { source: input.source } : {})
           })
           // El historial nunca debe hacer fallar una consulta.
           .catch(() => {})

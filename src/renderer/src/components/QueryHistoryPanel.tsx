@@ -113,6 +113,11 @@ export function QueryHistoryPanel({ connectionId, refreshKey, onInsert, onClose 
             <pre className="history-sql">{e.sql}</pre>
             <div className="history-meta">
               <span>{formatWhen(e.executedAt)}</span>
+              {e.source === 'mcp' && (
+                <span className="badge mcp" title="La ejecutó un agente de IA a través del servidor MCP">
+                  Agente
+                </span>
+              )}
               {e.database && <span>{e.database}</span>}
               <span>{e.durationMs} ms</span>
               {e.error ? (

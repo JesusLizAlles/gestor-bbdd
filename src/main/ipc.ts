@@ -1,15 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { app, dialog, ipcMain, type BrowserWindow } from 'electron'
+import { app, dialog, ipcMain, shell, type BrowserWindow } from 'electron'
 import { channelName, type ApiChannel, type IpcEnvelope } from '@shared/ipc'
 import type { ConnectionConfig, DbApi, SaveConnectionInput, SecretKey } from '@shared/types'
-import { ZodError } from 'zod'
+import { z, ZodError } from 'zod'
 import type { SessionManager } from './sessions'
 import { decryptSecrets, exportConnections, importConnections, parseConfigFile, type ConfigFile } from './config-transfer'
 import type { ConsoleStore } from './store/consoles'
 import type { HistoryStore } from './store/history'
 import type { Updater } from './updater'
+import { buildMcpb } from './mcp/bundle'
+import type { McpService } from './mcp/service'
+import { mcpSettingsSchema, type McpSettingsStore } from './mcp/settings'
+import { toolDefinitions } from './mcp/tools'
+import bridgeSource from '../mcp-bridge/bridge.cjs?raw'
 import type { ConnectionStore } from './store/connections'
 import type { SecretVault } from './store/secrets'
 import {
@@ -38,6 +43,11 @@ export interface IpcDeps {
   history: HistoryStore
   consoles: ConsoleStore
   updater: Updater
+  mcp: McpService
+  mcpSettings: McpSettingsStore
+  /** Carpeta de datos de la app: la extensión de Claude Desktop lee de ahí puerto y token. */
+  dataDir: string
+  iconPath: string
   window: () => BrowserWindow | null
 }
 
@@ -63,15 +73,25 @@ async function mergeSecrets(vault: SecretVault, input: SaveConnectionInput): Pro
 /** Un fichero de exportación de conexiones razonable ocupa unos KB; esto sobra. */
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 
-export function registerIpc({ store, vault, sessions, history, consoles, updater, window }: IpcDeps): void {
+export function registerIpc(deps: IpcDeps): void {
+  const { store, vault, sessions, history, consoles, updater, mcp, mcpSettings, window } = deps
   // Último fichero leído para importar: importConfig lo usa por token, sin recibir rutas del renderer.
   let pendingImport: { token: string; file: ConfigFile } | null = null
+  // Última extensión de Claude Desktop guardada: mcpOpenExtension la abre sin recibir rutas del renderer.
+  let lastExtension: string | null = null
   const handlers: Handlers = {
     secretStorageStatus: async () => vault.status(),
     listConnections: () => store.list(),
-    saveConnection: (input) => store.save(saveConnectionSchema.parse(input)),
+    saveConnection: async (input) => {
+      const saved = await store.save(saveConnectionSchema.parse(input))
+      // El agente reconecta con la configuración nueva (o deja de poder escribir si pasó a solo lectura).
+      await mcp.closeConnection(saved.id)
+      return saved
+    },
     deleteConnection: async (id) => {
       const connectionId = idSchema.parse(id)
+      await mcp.closeConnection(connectionId)
+      await mcpSettings.forgetConnection(connectionId)
       await store.delete(connectionId)
       await history.deleteConnection(connectionId)
       await consoles.deleteConnection(connectionId)
@@ -181,6 +201,35 @@ export function registerIpc({ store, vault, sessions, history, consoles, updater
       await writeFile(filePath, input.content, 'utf8')
       return filePath
     },
+    mcpState: () => mcp.state(),
+    mcpSaveSettings: (settings) => mcp.saveSettings(mcpSettingsSchema.parse(settings)),
+    mcpRegenerateToken: () => mcp.regenerateToken(),
+    mcpCreateExtension: async () => {
+      const win = window()
+      const options = {
+        title: 'Guardar extensión para Claude Desktop',
+        defaultPath: join(app.getPath('downloads'), 'gestor-bbdd.mcpb'),
+        filters: [{ name: 'Extensión de Claude Desktop', extensions: ['mcpb'] }]
+      }
+      const { canceled, filePath } = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+      if (canceled || !filePath) return null
+      const bundle = buildMcpb({
+        version: app.getVersion(),
+        dataDir: deps.dataDir,
+        bridgeSource,
+        tools: toolDefinitions(),
+        icon: await readFile(deps.iconPath).catch(() => null)
+      })
+      await writeFile(filePath, bundle)
+      lastExtension = filePath
+      return filePath
+    },
+    mcpOpenExtension: async () => {
+      if (!lastExtension) throw new Error('Primero crea la extensión')
+      const error = await shell.openPath(lastExtension)
+      if (error) throw new Error(`No se pudo abrir: ${error}. Arrástrala a Claude Desktop (Ajustes → Extensiones).`)
+    },
+    mcpRespondApproval: async (id, approved) => mcp.respondApproval(idSchema.parse(id), z.boolean().parse(approved)),
     pickFile: async (title) => {
       const win = window()
       const options = { title: String(title).slice(0, 200), properties: ['openFile' as const, 'showHiddenFiles' as const] }

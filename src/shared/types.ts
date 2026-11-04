@@ -145,7 +145,11 @@ export interface RunQueryInput {
   maxRows?: number
   /** El usuario confirmó ejecutar sentencias de escritura en una conexión de producción. */
   confirmedWrite?: boolean
+  /** Quién lanza la consulta: se guarda en el historial para distinguir las del agente (MCP). */
+  source?: QuerySource
 }
+
+export type QuerySource = 'mcp'
 
 export interface RunQueryOutput {
   results: QueryResult[]
@@ -305,6 +309,8 @@ export interface QueryHistoryEntry {
   /** Filas devueltas o afectadas por la última sentencia; null si no se llegó a ejecutar. */
   rowCount: number | null
   error?: string
+  /** 'mcp' si la lanzó un agente a través del servidor MCP. */
+  source?: QuerySource
 }
 
 export type HistoryKind = 'queries' | 'filters'
@@ -385,6 +391,64 @@ export interface ExportInput {
   content: string
 }
 
+/**
+ * Qué puede hacer un agente MCP con una conexión:
+ * - off: no la ve;
+ * - read: solo consultas de lectura;
+ * - confirm: también escrituras, pero cada una la aprueba el usuario en la app;
+ * - write: escrituras sin preguntar (no se ofrece en producción ni en conexiones de solo lectura).
+ */
+export type McpAccess = 'off' | 'read' | 'confirm' | 'write'
+
+export interface McpSettings {
+  enabled: boolean
+  /** Puerto local (solo 127.0.0.1). */
+  port: number
+  /** Máximo de filas que devuelve cada consulta al agente. */
+  maxRows: number
+  /** Acceso por id de conexión; las que no aparecen, 'off'. */
+  access: Record<string, McpAccess>
+}
+
+export interface McpActivity {
+  id: string
+  /** ISO 8601. */
+  at: string
+  tool: string
+  connection: string | null
+  /** SQL o parámetros resumidos. */
+  summary: string
+  outcome: 'ok' | 'error' | 'blocked' | 'rejected'
+  detail?: string
+  durationMs: number
+}
+
+export interface McpState {
+  settings: McpSettings
+  /** Token que deben enviar los clientes (Authorization: Bearer …). */
+  token: string
+  running: boolean
+  /** http://127.0.0.1:<puerto>/mcp cuando está en marcha. */
+  url: string | null
+  /** Por qué no arrancó (p. ej. puerto ocupado). */
+  error: string | null
+  /** Últimas llamadas del agente, de la más reciente a la más antigua. */
+  activity: McpActivity[]
+  /** Fichero de registro de todas las llamadas. */
+  logPath: string
+  /** Escrituras que esperan aprobación (las que ya no están, caducaron o se contestaron). */
+  pendingApprovals: string[]
+}
+
+/** Escritura de un agente que espera la aprobación del usuario. */
+export interface McpApprovalRequest {
+  id: string
+  connectionName: string
+  environment: Environment
+  database: string | null
+  statements: string[]
+}
+
 /** API expuesta por el preload en window.api. */
 export interface DbApi {
   secretStorageStatus(): Promise<SecretStorageStatus>
@@ -432,6 +496,18 @@ export interface DbApi {
   importConfig(input: ImportConfigInput): Promise<ImportResult>
   exportFile(input: ExportInput): Promise<string | null>
   pickFile(title: string): Promise<string | null>
+  mcpState(): Promise<McpState>
+  /** Cambia la configuración del servidor MCP (lo arranca, lo para o lo reinicia si hace falta). */
+  mcpSaveSettings(settings: McpSettings): Promise<McpState>
+  /** Token nuevo: los clientes configurados con el anterior dejan de funcionar. */
+  mcpRegenerateToken(): Promise<McpState>
+  /** Guarda la extensión para Claude Desktop (.mcpb); devuelve su ruta (null si se cancela). */
+  mcpCreateExtension(): Promise<string | null>
+  /** Abre la última extensión creada con su aplicación (Claude Desktop la instala). */
+  mcpOpenExtension(): Promise<void>
+  mcpRespondApproval(id: string, approved: boolean): Promise<void>
+  onMcpState(listener: (state: McpState) => void): () => void
+  onMcpApproval(listener: (request: McpApprovalRequest) => void): () => void
 }
 
 export const DEFAULT_MAX_ROWS = 500
@@ -439,3 +515,6 @@ export const DEFAULT_MAX_ROWS = 500
 export const PAGE_SIZES = [100, 500, 1000, 5000]
 
 export const DEFAULT_PORTS: Record<Engine, number> = { mysql: 3306, mssql: 1433 }
+
+export const DEFAULT_MCP_PORT = 47321
+export const DEFAULT_MCP_MAX_ROWS = 200

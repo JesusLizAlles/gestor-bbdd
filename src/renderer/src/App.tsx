@@ -1,11 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ConnectionSummary, ObjectKind, SecretStorageStatus, SessionInfo, TableInfo, TableRef } from '@shared/types'
+import type {
+  ConnectionSummary,
+  McpApprovalRequest,
+  McpState,
+  ObjectKind,
+  SecretStorageStatus,
+  SessionInfo,
+  TableInfo,
+  TableRef
+} from '@shared/types'
 import { ExportDialog, ImportDialog } from './components/ConfigTransfer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ConnectionDialog } from './components/ConnectionDialog'
 import { ConsoleView, type OpenConsole } from './components/ConsoleView'
 import { Explorer } from './components/Explorer'
 import { Icon } from './components/Icon'
+import { McpApprovalDialog } from './components/McpApprovalDialog'
+import { SettingsDialog } from './components/SettingsDialog'
 import { TableView, type OpenTable } from './components/TableView'
 import { UpdateControls } from './components/UpdateControls'
 import { keys } from './lib/platform'
@@ -50,6 +61,29 @@ export function App() {
   /** Conexiones abiertas con el árbol plegado (al conectar se despliega). */
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [mcp, setMcp] = useState<McpState | null>(null)
+  /** Escrituras del agente esperando aprobación, en orden de llegada. */
+  const [approvals, setApprovals] = useState<McpApprovalRequest[]>([])
+
+  useEffect(() => {
+    void window.api.mcpState().then(setMcp)
+    const offState = window.api.onMcpState((state) => {
+      setMcp(state)
+      // Las que caducaron en el proceso principal ya no se pueden aprobar.
+      setApprovals((list) => list.filter((a) => state.pendingApprovals.includes(a.id)))
+    })
+    const offApproval = window.api.onMcpApproval((request) => setApprovals((list) => [...list, request]))
+    return () => {
+      offState()
+      offApproval()
+    }
+  }, [])
+
+  const answerApproval = (request: McpApprovalRequest, approved: boolean) => {
+    setApprovals((list) => list.filter((a) => a.id !== request.id))
+    void window.api.mcpRespondApproval(request.id, approved)
+  }
 
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null
   const activeSession = activeTab ? sessions.find((s) => s.info.sessionId === activeTab.sessionId) : undefined
@@ -221,6 +255,9 @@ export function App() {
         <div className="section-title">
           Conexiones
           <span className="section-actions">
+            <button className="icon" title="Ajustes (servidor MCP para agentes de IA)" onClick={() => setSettingsOpen(true)}>
+              <Icon name="settings" />
+            </button>
             <button className="icon" title="Importar conexiones…" onClick={() => setTransfer('import')}>
               <Icon name="import" />
             </button>
@@ -428,6 +465,20 @@ export function App() {
           </span>
         )}
         <span className="spacer" />
+        {mcp?.running && (
+          <button
+            className="statusbar-mcp"
+            title={`Servidor MCP en ${mcp.url}. Clic para ver los ajustes y la actividad del agente`}
+            onClick={() => setSettingsOpen(true)}
+          >
+            MCP activo
+          </button>
+        )}
+        {mcp?.error && (
+          <button className="statusbar-mcp error" title={mcp.error} onClick={() => setSettingsOpen(true)}>
+            MCP: error
+          </button>
+        )}
         <span className="note">{keys('Doble clic: abrir tabla · Enter: editar celda · Alt+Enter: guardar · F5: recargar · Ctrl+W: cerrar')}</span>
         <UpdateControls />
       </footer>
@@ -446,6 +497,16 @@ export function App() {
             setSessions((list) => list.map(rename))
             setTabs((list) => list.map(rename))
           }}
+        />
+      )}
+
+      {settingsOpen && <SettingsDialog connections={connections} onClose={() => setSettingsOpen(false)} />}
+      {approvals[0] && (
+        <McpApprovalDialog
+          key={approvals[0].id}
+          request={approvals[0]}
+          pending={approvals.length - 1}
+          onAnswer={(approved) => answerApproval(approvals[0]!, approved)}
         />
       )}
 

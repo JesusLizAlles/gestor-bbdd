@@ -90,6 +90,53 @@ se genera por detrás.
   | <kbd>Ctrl</kbd>+<kbd>W</kbd> o clic central | Cerrar pestaña |
   | <kbd>Ctrl</kbd>+<kbd>Tab</kbd> o <kbd>Ctrl</kbd>+<kbd>RePág</kbd>/<kbd>AvPág</kbd> | Cambiar de pestaña |
 - **Varias pestañas y consolas de una misma conexión** comparten su conexión de consultas y esperan turno, sin errores.
+- **Servidor MCP para agentes de IA** (Claude Desktop, Claude Code u otro cliente MCP): consultan, analizan y, si lo
+  permites, modifican tus bases de datos por su cuenta, con permisos por conexión. Ver más abajo.
+
+## Agentes de IA (servidor MCP)
+
+Desde **Ajustes** (engranaje junto a «Conexiones») se activa un servidor [MCP](https://modelcontextprotocol.io) que
+deja a un agente trabajar con las conexiones guardadas en la app. Las contraseñas no salen de la app: el agente solo
+recibe lo que devuelven las consultas.
+
+> **Cuidado.** Un agente puede equivocarse, y los datos que lee pueden contener instrucciones maliciosas (*prompt
+> injection*). Da el mínimo acceso necesario, mejor con usuarios de base de datos con permisos limitados, y ten copias
+> de seguridad antes de permitir escrituras.
+
+**Acceso por conexión** (por defecto, ninguna):
+
+| Nivel | Qué puede hacer el agente |
+| --- | --- |
+| Sin acceso | No ve la conexión. |
+| Solo lectura | `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`. Su sesión se abre como de solo lectura (en MySQL/MariaDB, también en el servidor). |
+| Escritura con mi aprobación | Además, modificar datos y estructura: la app enseña el SQL y no se ejecuta hasta pulsar «Ejecutar» (5 minutos para responder; si no, se rechaza). |
+| Escritura sin preguntar | Igual, sin confirmación. No se ofrece en producción ni en conexiones de solo lectura. |
+
+**Herramientas que ve el agente:** `list_connections`, `list_databases`, `list_tables`, `describe_table`
+(columnas, índices, claves foráneas y DDL), `search_columns` (busca columnas por nombre en toda una base de datos),
+`run_query` (solo lectura) y `execute_sql` (escritura).
+
+- Cada consulta devuelve como mucho las filas fijadas en Ajustes (200 por defecto, hasta 5000). Las celdas de más
+  de 4000 caracteres y las respuestas de más de 200.000 se recortan, avisando al agente.
+- El agente usa sus propias conexiones al servidor, no las de tus pestañas: su `USE` no cambia tu consola. Se cierran
+  tras 10 minutos sin uso, al quitarle el acceso o al editar la conexión.
+- Sus consultas aparecen en el historial de la consola con la etiqueta «Agente».
+- Todo lo que hace se ve en Ajustes → Actividad del agente y queda en `logs/mcp.log` (JSON, una línea por llamada).
+
+**Conectar Claude Desktop.** En Ajustes, «Crear extensión (.mcpb)…» y luego «Instalar en Claude Desktop» (o arrastra el
+fichero a Ajustes → Extensiones de Claude Desktop). Solo se hace una vez: la extensión lee el puerto y el token del
+`mcp.json` de la app, así que no hay que reinstalarla si cambian. Si la app está cerrada o el servidor desactivado,
+Claude ve las herramientas pero cada llamada le explica que hay que abrir Gestor BBDD.
+
+**Conectar Claude Code.** Ajustes muestra el comando listo para copiar:
+
+```bash
+claude mcp add --scope user --transport http gestor-bbdd http://127.0.0.1:47321/mcp --header "Authorization: Bearer <token>"
+```
+
+**Otros clientes MCP:** transporte Streamable HTTP en `http://127.0.0.1:<puerto>/mcp` con cabecera
+`Authorization: Bearer <token>`, o el puente stdio de la extensión (`src/mcp-bridge/bridge.cjs`) con
+`GESTOR_BBDD_DATA_DIR` apuntando a la carpeta de datos de la app.
 
 ## Puesta en marcha
 
@@ -182,6 +229,8 @@ La versión 0.2.0 no incluye el actualizador: hay que instalar a mano una vez la
 | --- | --- |
 | `src/shared` | Tipos, separador de sentencias SQL, clasificación lectura/escritura, SQL del visor (`table-query.ts`) y exportadores. Lo usan los dos procesos. |
 | `src/main` | Proceso principal: drivers, túnel SSH, sesiones, almacenamiento e IPC. |
+| `src/main/mcp` | Servidor MCP: transporte HTTP, protocolo, herramientas, permisos y la extensión `.mcpb`. |
+| `src/mcp-bridge` | Puente stdio ↔ HTTP que va dentro de la extensión de Claude Desktop (Node sin dependencias). |
 | `src/preload` | Puente mínimo que expone `window.api` al renderer. |
 | `src/renderer` | Interfaz React. |
 | `tests` | Tests unitarios y de integración (Vitest). |
@@ -193,7 +242,7 @@ Cada conexión abierta usa **dos conexiones al servidor**:
 
 Con SSH, el driver conecta a `127.0.0.1:<puerto local>` y el túnel reenvía el tráfico al servidor.
 
-Los datos de la app se guardan en `~/.config/Gestor BBDD/`: `connections.json`, `secrets.json`, `known_hosts.json`, `history.json` y `consoles.json`, todos con permisos 0600.
+Los datos de la app se guardan en `~/.config/Gestor BBDD/`: `connections.json`, `secrets.json`, `known_hosts.json`, `history.json`, `consoles.json` y `mcp.json` (ajustes y token del servidor MCP), todos con permisos 0600.
 
 El historial guarda el texto de las consultas tal cual: si escribes datos sensibles en una consulta, quedan en `history.json`. Se puede borrar desde el panel de historial y se borra junto con la conexión. Los scripts de más de 100.000 caracteres no se guardan. Lo mismo vale para lo escrito en las consolas (`consoles.json`): se borra al vaciar la consola o al borrar la conexión.
 
@@ -239,6 +288,14 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
 - Solo lectura en dos capas:
   - En la app: clasificación conservadora de cada sentencia.
   - En MySQL/MariaDB, además, `SET SESSION TRANSACTION READ ONLY` en el servidor.
+- Servidor MCP:
+  - Desactivado por defecto y sin acceso a ninguna conexión hasta que se le da.
+  - Solo escucha en `127.0.0.1` y exige un token aleatorio de 256 bits en cada petición.
+  - Rechaza peticiones con otro `Host` u `Origin` (defensa contra *DNS rebinding* desde una web).
+  - El token se guarda en claro en `mcp.json` (0600) para que la extensión de Claude Desktop lo lea. Quien pueda leer
+    tus ficheros puede usarlo mientras la app esté abierta: regenéralo desde Ajustes si hace falta.
+  - En SQL Server, la solo lectura del agente depende de la clasificación de la app: para más garantía, dale un
+    usuario de base de datos con permisos de solo lectura.
 
 ## Limitaciones conocidas
 

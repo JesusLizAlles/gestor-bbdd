@@ -1921,3 +1921,148 @@ button.compact.on {
   display: block;
   flex: none;
 }
+
+/* Ajustes: servidor MCP */
+.dialog.settings .body h3 {
+  font-size: 13px;
+  margin: 18px 0 6px;
+}
+.dialog.settings .body h3:first-child {
+  margin-top: 0;
+}
+.dialog.settings .body > .check {
+  margin: 4px 0 10px;
+}
+.mcp-grid {
+  grid-template-columns: 130px 1fr;
+}
+.mcp-grid input[type='number'] {
+  width: 110px;
+}
+.mcp-token,
+.mcp-command {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  user-select: all;
+  word-break: break-all;
+  min-width: 0;
+}
+.mcp-command {
+  flex: 1;
+}
+.badge.mcp-on {
+  background: rgba(95, 184, 101, 0.15);
+  color: var(--ok);
+}
+.mcp-access {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+.mcp-access-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.mcp-access-row:last-child {
+  border-bottom: none;
+}
+.mcp-access-row .spacer {
+  flex: 1;
+}
+.mcp-conn-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-access-row select {
+  width: 220px;
+  flex: none;
+}
+.mcp-clients {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.mcp-clients .row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.mcp-clients p {
+  margin: 4px 0 8px;
+}
+.mcp-activity {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 12px;
+  user-select: text;
+}
+.mcp-activity-row {
+  display: grid;
+  grid-template-columns: 64px 120px 120px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.mcp-activity-row:last-child {
+  border-bottom: none;
+}
+.mcp-activity-row > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-time {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.mcp-tool {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.mcp-summary {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.badge.outcome.ok {
+  color: var(--ok);
+}
+.badge.outcome.error,
+.badge.outcome.rejected {
+  color: #ffb3ae;
+}
+.badge.outcome.blocked {
+  color: var(--warn);
+}
+.badge.mcp {
+  background: rgba(53, 116, 240, 0.18);
+  color: var(--accent-hover);
+}
+.statusbar-mcp {
+  height: auto;
+  padding: 0 6px;
+  font-size: 11px;
+  background: rgba(95, 184, 101, 0.15);
+  border: none;
+  color: var(--ok);
+}
+.statusbar-mcp.error {
+  background: rgba(229, 83, 75, 0.15);
+  color: #ffb3ae;
+}
+input.invalid {
+  border-color: var(--danger);
+}
