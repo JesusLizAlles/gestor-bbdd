@@ -34,7 +34,8 @@ const SEED = `
     (2,'Hotel Menorca','2026-07-15','2026-07-22',980.00,'pendiente','Cuna en la habitación'),
     (3,'Hotel Mallorca','2026-08-02','2026-08-09',1530.75,'confirmada',NULL),
     (4,'Hotel Mallorca','2026-08-10','2026-08-12',310.00,'cancelada','Cancelada por el cliente'),
-    (5,'Hotel Menorca','2026-09-05','2026-09-12',1105.20,'confirmada',NULL);
+    (5,'Hotel Menorca','2026-09-05','2026-09-12',1105.20,'confirmada',
+     '{"huespedes":[{"nombre":"Jordi Puig","edad":41},{"nombre":"Núria Puig","edad":9}],"regimen":"MP","id_externo":12345678901234567890,"vip":true,"tarjeta":null}');
   CREATE TABLE eventos (id INT PRIMARY KEY, descripcion VARCHAR(40));
   -- Sin CTE recursiva: MySQL y MariaDB la limitan a 1000 iteraciones por defecto.
   INSERT INTO eventos
@@ -155,6 +156,27 @@ describe.skipIf(!enabled)('Gestor BBDD (E2E)', () => {
     await expect(view().getByLabel('Filtro', { exact: true }).inputValue()).resolves.toBe('`id` = 3')
     expect(await view().locator('.grid-row').count()).toBe(1)
     await shot('03-navegacion-fk')
+  })
+
+  it('el visor enseña como árbol plegable el JSON guardado en una columna de texto', async () => {
+    await tab('reservas').click()
+    await view().locator('.grid-cell', { hasText: '"regimen"' }).click()
+    const viewer = view().locator('.value-viewer.json')
+    await viewer.locator('.json-key', { hasText: '"regimen"' }).waitFor()
+    // El número largo no se redondea; los huéspedes (2.º nivel) se ven plegados con su resumen.
+    await viewer.locator('.json-number', { hasText: '12345678901234567890' }).waitFor()
+    expect(await viewer.locator('.json-summary', { hasText: '2 claves' }).count()).toBe(2)
+    await shot('04b-visor-json')
+    await viewer.getByRole('button', { name: 'Contraer todo' }).click()
+    await viewer.locator('.json-summary', { hasText: '5 claves' }).waitFor()
+    await viewer.getByRole('button', { name: 'Expandir todo' }).click()
+    await viewer.locator('.json-string', { hasText: '"Núria Puig"' }).waitFor()
+    await viewer.getByRole('button', { name: 'Texto' }).click()
+    await viewer.locator('.json-text', { hasText: '"edad": 9' }).waitFor()
+    // Un texto normal se sigue viendo como siempre.
+    await view().locator('.grid-cell', { hasText: 'Hotel Menorca' }).first().click()
+    await view().locator('.value-viewer', { hasText: 'Hotel Menorca' }).waitFor()
+    expect(await view().locator('.value-viewer.json').count()).toBe(0)
   })
 
   it('pagina tablas grandes y se mueve con el teclado', async () => {

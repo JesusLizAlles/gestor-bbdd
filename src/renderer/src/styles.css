@@ -1420,6 +1420,102 @@ input[type='checkbox'].invalid {
   font-family: system-ui, sans-serif;
 }
 
+/* Visor de JSON guardado en una celda: barra fija y el árbol con su propio scroll. */
+.value-viewer.json {
+  max-height: 45vh;
+  overflow: hidden;
+}
+.value-viewer.json .value-text {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(45vh - 12px);
+  min-height: 0;
+}
+.json-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 4px;
+}
+.json-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding-bottom: 4px;
+  font-family: system-ui, sans-serif;
+}
+.json-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+.json-body {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  line-height: 1.5;
+}
+.json-text {
+  margin: 0;
+  font: inherit;
+  white-space: pre;
+}
+.json-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-left: 14px;
+  text-indent: -14px;
+}
+.json-branch {
+  cursor: pointer;
+  border-radius: 2px;
+}
+.json-branch:hover {
+  background: var(--bg-hover);
+}
+.json-children {
+  margin-left: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.json-toggle {
+  display: inline-block;
+  width: 14px;
+  text-indent: 0;
+  color: var(--text-dim);
+  user-select: none;
+}
+.json-key {
+  color: #c77dbb;
+}
+.json-index {
+  color: var(--text-dim);
+}
+.json-string {
+  color: #6aab73;
+}
+.json-number {
+  color: #2aacb8;
+}
+.json-literal {
+  color: #cf8e6d;
+}
+.json-punct {
+  color: var(--text-dim);
+}
+.json-summary {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 /* Altas y bajas en la rejilla */
 .grid-cell.row-new {
   box-shadow: inset 3px 0 0 var(--ok);

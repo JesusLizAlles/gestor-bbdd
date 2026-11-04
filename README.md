@@ -38,6 +38,9 @@ se genera por detrás.
   - <kbd>Ctrl</kbd>+<kbd>C</kbd> copia el bloque como texto separado por tabuladores (se pega tal cual en Excel);
     <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> incluye las cabeceras. NULL se copia como `NULL`.
   - **Navegación por claves foráneas**: botón ↗, Ctrl+clic o Ctrl+B en una celda abren la fila referenciada.
+  - **JSON en columnas de texto**: si el valor de la celda es un objeto o array JSON válido (aunque la columna sea
+    `LONGTEXT`, `NVARCHAR(MAX)`…), el visor de abajo lo enseña como árbol con colores y nodos plegables, o como texto
+    con sangría. Respeta el orden de las claves y el texto exacto de los números (IDs largos sin redondear).
   - Exportar la página a CSV, CSV para Excel, JSON o `INSERT`.
 - **Edición en la rejilla**, al estilo JetBrains:
   - Para editar: <kbd>Enter</kbd>, <kbd>F2</kbd>, doble clic o empezar a escribir sobre la celda. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserta un salto de línea; <kbd>Esc</kbd> cancela.

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { parseTsv, toTsv } from '@shared/format'
+import { parseJsonCell } from '@shared/json'
 import type { CellValue, ForeignKeyInfo, ResultColumn, SortSpec } from '@shared/types'
 import { isAddRowKey, isDeleteKey, keys } from '../lib/platform'
+import { JsonView } from './JsonView'
 
 const ROW_HEIGHT = 24
 const HEADER_HEIGHT = 40
@@ -160,6 +162,8 @@ export function DataGrid(props: Props) {
   useEffect(() => onSelectionChange?.(selectedRows), [selectedRows])
 
   const selectedValue = selected ? valueAt(selected.row, selected.col) : undefined
+  // JSON guardado como texto: el visor lo enseña como árbol. Solo se analiza al cambiar el valor.
+  const selectedJson = useMemo(() => parseJsonCell(selectedValue), [selectedValue])
   const sortOf = (name: string) => sort.find((s) => s.column === name)?.direction
 
   const fkIndexes = useMemo(() => {
@@ -625,11 +629,17 @@ export function DataGrid(props: Props) {
         {props.children}
       </div>
       {selected && (
-        <div className="value-viewer">
+        <div className={`value-viewer ${selectedJson ? 'json' : ''}`}>
           <span className="value-text">
-            <strong>{columns[selected.col]?.name}</strong> ({isNew(selected.row) ? 'fila nueva' : `fila ${rowOffset + selected.row + 1}`}
-            {multi && rect ? selectionSummary(rect, mode) : ''}):{' '}
-            {viewerText(selected.col, selectedValue)}
+            <span>
+              <strong>{columns[selected.col]?.name}</strong> ({isNew(selected.row) ? 'fila nueva' : `fila ${rowOffset + selected.row + 1}`}
+              {multi && rect ? selectionSummary(rect, mode) : ''}):{' '}
+            </span>
+            {selectedJson ? (
+              <JsonView node={selectedJson} id={`${selected.row}:${selected.col}`} />
+            ) : (
+              viewerText(selected.col, selectedValue)
+            )}
           </span>
           {editable && !isDeleted(selected.row) && (
             <span className="value-actions">
