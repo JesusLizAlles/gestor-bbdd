@@ -209,7 +209,7 @@ export function FilterInput({ engine, connectionId, tableRef, columns, value, ap
           aria-expanded={menu !== null}
           aria-autocomplete="list"
           spellCheck={false}
-          placeholder={engine === 'mysql' ? "p. ej. estado = 'confirmada' AND importe > 100" : "p. ej. Codigo LIKE 'A%'"}
+          placeholder={engine === 'mssql' ? "p. ej. Codigo LIKE 'A%'" : "p. ej. estado = 'confirmada' AND importe > 100"}
           value={value}
           onChange={onInput}
           onKeyDown={onKeyDown}

@@ -16,18 +16,20 @@ const KEYWORDS = new Set([
   'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'LIKE', 'BETWEEN', 'EXISTS', 'TRUE', 'FALSE', 'CASE', 'WHEN', 'THEN',
   'ELSE', 'END', 'AS', 'ESCAPE', 'COLLATE', 'INTERVAL', 'DAY', 'MONTH', 'YEAR', 'HOUR', 'MINUTE', 'SECOND', 'WEEK',
   'DATE', 'TIME', 'TIMESTAMP', 'REGEXP', 'RLIKE', 'XOR', 'DIV', 'MOD', 'SELECT', 'FROM', 'WHERE', 'ANY', 'ALL',
-  'SOME', 'BINARY', 'CURRENT_DATE', 'CURRENT_TIMESTAMP', 'CURRENT_TIME', 'UNKNOWN'
+  'SOME', 'BINARY', 'CURRENT_DATE', 'CURRENT_TIMESTAMP', 'CURRENT_TIME', 'UNKNOWN', 'ILIKE', 'SIMILAR', 'TO', 'DISTINCT'
 ])
 
-const NOT_CALLS = new Set(['IN', 'EXISTS', 'NOT', 'AND', 'OR', 'XOR', 'ANY', 'ALL', 'SOME', 'AS', 'BETWEEN', 'LIKE', 'IS', 'WHEN', 'THEN', 'ELSE'])
+const NOT_CALLS = new Set(['IN', 'EXISTS', 'NOT', 'AND', 'OR', 'XOR', 'ANY', 'ALL', 'SOME', 'AS', 'BETWEEN', 'LIKE', 'ILIKE', 'IS', 'WHEN', 'THEN', 'ELSE'])
 
 const WORD_START = /[A-Za-z_@$#À-￿]/
 const WORD_CHAR = /[\w@$#À-￿]/
-const OPERATORS = ['<=>', '<>', '!=', '>=', '<=', '||', '&&', '=', '<', '>', '+', '-', '*', '/', '%', '(', ')', ',', '.', ';', '!', '&', '|', '^', '~']
+const OPERATORS = ['<=>', '::', '<>', '!=', '>=', '<=', '||', '&&', '~*', '=', '<', '>', '+', '-', '*', '/', '%', '(', ')', ',', '.', ';', '!', '&', '|', '^', '~']
 
 /** Trocea un filtro para colorearlo. Las columnas se reconocen por nombre (sin distinguir mayúsculas). */
 export function tokenize(text: string, engine: Engine, columns: Iterable<string> = []): Token[] {
   const isMy = engine === 'mysql'
+  const isMs = engine === 'mssql'
+  const isPg = engine === 'postgres'
   const known = new Set([...columns].map((c) => c.toLowerCase()))
   const tokens: Token[] = []
   const push = (type: TokenType, start: number, end: number, open = false) =>
@@ -48,13 +50,20 @@ export function tokenize(text: string, engine: Engine, columns: Iterable<string>
       const close = text.indexOf('*/', i + 2)
       i = close < 0 ? n : close + 2
       push('comment', start, i, close < 0)
-    } else if (ch === "'" || (ch === '"' && isMy) || ((ch === 'N' || ch === 'n') && next === "'" && !isMy)) {
-      // En MySQL las comillas dobles son cadenas y la barra invertida escapa; en T-SQL N'…' es Unicode.
+    } else if (
+      ch === "'" ||
+      (ch === '"' && isMy) ||
+      ((ch === 'N' || ch === 'n') && next === "'" && isMs) ||
+      ((ch === 'E' || ch === 'e') && next === "'" && isPg && !WORD_CHAR.test(text[i - 1] ?? ' '))
+    ) {
+      // En MySQL las comillas dobles son cadenas y la barra invertida escapa; en T-SQL N'…' es Unicode;
+      // en PostgreSQL E'…' admite escapes con barra invertida.
       const quote = ch === '"' ? '"' : "'"
+      const backslash = isMy || (isPg && ch !== quote)
       i += ch === quote ? 1 : 2
       let closed = false
       while (i < n) {
-        if (isMy && text[i] === '\\') i += 2
+        if (backslash && text[i] === '\\') i += 2
         else if (text[i] === quote && text[i + 1] === quote) i += 2
         else if (text[i] === quote) {
           i++
@@ -63,7 +72,7 @@ export function tokenize(text: string, engine: Engine, columns: Iterable<string>
         } else i++
       }
       push('string', start, Math.min(i, n), !closed)
-    } else if (ch === '`' || ch === '[' || ch === '"') {
+    } else if ((ch === '`' && isMy) || (ch === '[' && isMs) || ch === '"') {
       const close = ch === '[' ? ']' : ch
       const end = text.indexOf(close, i + 1)
       i = end < 0 ? n : end + 1
@@ -178,7 +187,28 @@ const MSSQL_FUNCTIONS: Fn[] = [
   { name: 'COALESCE', template: 'COALESCE(|)', detail: 'primer valor no NULL' }
 ]
 
-const FUNCTION_NAMES = new Set([...MYSQL_FUNCTIONS, ...MSSQL_FUNCTIONS].map((f) => f.name))
+const POSTGRES_FUNCTIONS: Fn[] = [
+  { name: 'NOW', template: 'now()|', detail: 'fecha y hora actual' },
+  { name: 'CURRENT_DATE', template: 'CURRENT_DATE|', detail: 'fecha de hoy' },
+  { name: 'DATE_TRUNC', template: "date_trunc('day', |)", detail: 'truncar fecha' },
+  { name: 'EXTRACT', template: 'EXTRACT(YEAR FROM |)', detail: 'parte de una fecha' },
+  { name: 'AGE', template: 'age(|)', detail: 'tiempo transcurrido' },
+  { name: 'TO_CHAR', template: "to_char(|, 'YYYY-MM-DD')", detail: 'formatear' },
+  { name: 'LOWER', template: 'lower(|)', detail: 'minúsculas' },
+  { name: 'UPPER', template: 'upper(|)', detail: 'mayúsculas' },
+  { name: 'TRIM', template: 'trim(|)', detail: 'quitar espacios' },
+  { name: 'LENGTH', template: 'length(|)', detail: 'longitud' },
+  { name: 'CONCAT', template: 'concat(|)', detail: 'concatenar' },
+  { name: 'SUBSTRING', template: 'substring(|, 1, 10)', detail: 'subcadena' },
+  { name: 'COALESCE', template: 'coalesce(|)', detail: 'primer valor no NULL' },
+  { name: 'NULLIF', template: 'nullif(|, 0)', detail: 'NULL si son iguales' },
+  { name: 'CAST', template: 'CAST(| AS date)', detail: 'convertir tipo' },
+  { name: 'ANY', template: 'ANY(|)', detail: 'algún elemento del array' },
+  { name: 'JSONB_EXTRACT_PATH_TEXT', template: "jsonb_extract_path_text(|, 'clave')", detail: 'valor de un JSON' }
+]
+
+const FUNCTION_NAMES = new Set([...MYSQL_FUNCTIONS, ...MSSQL_FUNCTIONS, ...POSTGRES_FUNCTIONS].map((f) => f.name))
+const FUNCTIONS: Record<Engine, Fn[]> = { mysql: MYSQL_FUNCTIONS, mssql: MSSQL_FUNCTIONS, postgres: POSTGRES_FUNCTIONS }
 
 const fromTemplate = (template: string, kind: SuggestionKind, label: string, detail?: string): Suggestion => {
   const caret = template.indexOf('|')
@@ -190,12 +220,13 @@ const isDate = (type: string) => /date|time/i.test(type)
 const isText = (type: string) => /char|text|uniqueidentifier|enum|set|xml/i.test(type)
 
 /** Comparadores tras una columna; si es una fecha, los ejemplos ya llevan fechas. */
-function operators(column: FilterColumn | undefined, today: string): Suggestion[] {
+function operators(engine: Engine, column: FilterColumn | undefined, today: string): Suggestion[] {
   const date = column && isDate(column.dataType)
   const simple = ['=', '<>', '>', '<', '>=', '<='].map((op) => ({ label: op, kind: 'operator' as const, insert: op }))
   return [
     ...simple,
     fromTemplate("LIKE '%|%'", 'operator', 'LIKE', 'contiene'),
+    ...(engine === 'postgres' ? [fromTemplate("ILIKE '%|%'", 'operator', 'ILIKE', 'contiene, sin distinguir mayúsculas')] : []),
     fromTemplate("NOT LIKE '%|%'", 'operator', 'NOT LIKE'),
     fromTemplate('IN (|)', 'operator', 'IN', 'en una lista'),
     fromTemplate('NOT IN (|)', 'operator', 'NOT IN'),
@@ -210,10 +241,18 @@ function operators(column: FilterColumn | undefined, today: string): Suggestion[
 /** Valores tras un comparador, según el tipo de la columna comparada. */
 function values(engine: Engine, column: FilterColumn | undefined, today: string): Suggestion[] {
   const isMy = engine === 'mysql'
+  const isPg = engine === 'postgres'
   const out: Suggestion[] = []
   if (column && isDate(column.dataType)) {
     out.push({ label: `'${today}'`, kind: 'value', insert: `'${today}'`, detail: 'hoy' })
-    if (isMy) {
+    if (isPg) {
+      out.push(
+        { label: 'CURRENT_DATE', kind: 'value', insert: 'CURRENT_DATE', detail: 'hoy' },
+        { label: 'now()', kind: 'value', insert: 'now()', detail: 'ahora' },
+        fromTemplate("CURRENT_DATE - INTERVAL '|7 days'", 'value', "CURRENT_DATE - INTERVAL '7 days'", 'hace 7 días'),
+        fromTemplate("CURRENT_DATE - INTERVAL '|1 month'", 'value', "CURRENT_DATE - INTERVAL '1 month'", 'hace un mes')
+      )
+    } else if (isMy) {
       out.push(
         { label: 'CURDATE()', kind: 'value', insert: 'CURDATE()', detail: 'hoy' },
         { label: 'NOW()', kind: 'value', insert: 'NOW()', detail: 'ahora' },
@@ -229,15 +268,21 @@ function values(engine: Engine, column: FilterColumn | undefined, today: string)
       )
     }
   } else if (column && isText(column.dataType)) {
-    out.push(fromTemplate(isMy ? "'|'" : "N'|'", 'value', isMy ? "'…'" : "N'…'", 'cadena'))
+    const unicode = engine === 'mssql'
+    out.push(fromTemplate(unicode ? "N'|'" : "'|'", 'value', unicode ? "N'…'" : "'…'", 'cadena'))
   }
   out.push({ label: 'NULL', kind: 'keyword', insert: 'NULL' })
-  if (isMy) out.push({ label: 'TRUE', kind: 'keyword', insert: 'TRUE' }, { label: 'FALSE', kind: 'keyword', insert: 'FALSE' })
+  if (isMy || isPg) out.push({ label: 'TRUE', kind: 'keyword', insert: 'TRUE' }, { label: 'FALSE', kind: 'keyword', insert: 'FALSE' })
   return out
 }
 
-const quoteName = (engine: Engine, name: string) =>
-  /^[A-Za-z_][\w$]*$/.test(name) ? name : engine === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `[${name.replace(/]/g, ']]')}]`
+/** Nombre de columna tal cual si se puede; si no, entre comillas. PostgreSQL pasa a minúsculas los nombres sin comillas. */
+const quoteName = (engine: Engine, name: string) => {
+  if (engine === 'postgres') {
+    return /^[a-z_][a-z0-9_$]*$/.test(name) && !KEYWORDS.has(name.toUpperCase()) ? name : `"${name.replace(/"/g, '""')}"`
+  }
+  return /^[A-Za-z_][\w$]*$/.test(name) ? name : engine === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `[${name.replace(/]/g, ']]')}]`
+}
 
 const significant = (t: Token) => t.type !== 'space' && t.type !== 'comment'
 
@@ -313,7 +358,7 @@ export function suggest(
 
   const columnItems = (): Suggestion[] =>
     columns.map((c) => ({ label: c.name, kind: 'column', insert: quoteName(engine, c.name), detail: c.dataType }))
-  const fns = engine === 'mysql' ? MYSQL_FUNCTIONS : MSSQL_FUNCTIONS
+  const fns = FUNCTIONS[engine]
   const functionItems = (): Suggestion[] => fns.map((f) => fromTemplate(f.template, 'function', f.name, f.detail))
   const kw = (...words: string[]): Suggestion[] => words.map((w) => ({ label: w, kind: 'keyword', insert: w }))
   const connectors = () => kw('AND', 'OR')
@@ -338,11 +383,16 @@ export function suggest(
       items = [...(inList ? values(engine, subject(), today) : []), ...columnItems(), ...functionItems(), ...(inList ? [] : values(engine, undefined, today))]
     }
   } else if (prev === 'NOT') {
-    items = [fromTemplate("LIKE '%|%'", 'operator', 'LIKE'), fromTemplate('IN (|)', 'operator', 'IN'), ...kw('BETWEEN')]
-  } else if (prev === 'BETWEEN' || isComparison(prev) || ['LIKE', 'REGEXP', 'RLIKE', '+', '-', '*', '/', '%'].includes(prev)) {
+    items = [
+      fromTemplate("LIKE '%|%'", 'operator', 'LIKE'),
+      ...(engine === 'postgres' ? [fromTemplate("ILIKE '%|%'", 'operator', 'ILIKE')] : []),
+      fromTemplate('IN (|)', 'operator', 'IN'),
+      ...kw('BETWEEN')
+    ]
+  } else if (prev === 'BETWEEN' || isComparison(prev) || ['LIKE', 'ILIKE', 'REGEXP', 'RLIKE', '+', '-', '*', '/', '%', '~', '~*'].includes(prev)) {
     items = [...values(engine, subject(), today), ...columnItems(), ...functionItems()]
   } else if (last.type === 'column' || last.type === 'ident' || (prev === ')' && closesCall())) {
-    items = operators(subject() ?? columnOf(last), today)
+    items = operators(engine, subject() ?? columnOf(last), today)
     if (last.type === 'ident' || prev === ')') items.push(...connectors())
   } else if (last.type === 'string' || last.type === 'number' || prev === ')' || ['NULL', 'TRUE', 'FALSE'].includes(prev)) {
     // Dentro de BETWEEN x … solo cabe AND.

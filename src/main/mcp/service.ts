@@ -210,8 +210,8 @@ export class McpService {
     let pending = this.agentSessions.get(config.id)
     if (!pending) {
       pending = (async () => {
-        // Con acceso de solo lectura, la sesión del agente se abre como de solo lectura: en MySQL/MariaDB
-        // eso añade SET SESSION TRANSACTION READ ONLY, una segunda barrera en el propio servidor.
+        // Con acceso de solo lectura, la sesión del agente se abre como de solo lectura: en MySQL/MariaDB y
+        // PostgreSQL eso pone las transacciones en READ ONLY, una segunda barrera en el propio servidor.
         const { access } = await this.deps.settings.get()
         const readOnly = config.readOnly || effectiveAccess(config, access[config.id]) === 'read'
         const info = await this.deps.sessions.open({ ...config, readOnly }, await this.deps.connections.secrets(config.id))

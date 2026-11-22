@@ -54,7 +54,7 @@ export function buildPageQuery(engine: Engine, ref: TableRef, o: PageQueryOption
   const offset = Math.max(0, Math.trunc(o.offset))
   const fetch = Math.max(1, Math.trunc(o.limit)) + 1
   const base = `SELECT * FROM ${from}${whereClause(o.where)}${orderClause(engine, o.sort, o.fallbackOrder)}`
-  return engine === 'mysql' ? `${base} LIMIT ${fetch} OFFSET ${offset}` : `${base} OFFSET ${offset} ROWS FETCH NEXT ${fetch} ROWS ONLY`
+  return engine === 'mssql' ? `${base} OFFSET ${offset} ROWS FETCH NEXT ${fetch} ROWS ONLY` : `${base} LIMIT ${fetch} OFFSET ${offset}`
 }
 
 /**
@@ -64,9 +64,9 @@ export function buildPageQuery(engine: Engine, ref: TableRef, o: PageQueryOption
 export function buildSelectColumns(engine: Engine, ref: TableRef, columns: string[], limit = 1000): string {
   const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
   const list = columns.length ? columns.map((c) => `  ${quoteIdent(c, engine)}`).join(',\n') : '  *'
-  return engine === 'mysql'
-    ? `SELECT\n${list}\nFROM ${from}\nLIMIT ${limit}`
-    : `SELECT TOP (${limit})\n${list}\nFROM ${from}`
+  return engine === 'mssql'
+    ? `SELECT TOP (${limit})\n${list}\nFROM ${from}`
+    : `SELECT\n${list}\nFROM ${from}\nLIMIT ${limit}`
 }
 
 export function buildCountQuery(engine: Engine, ref: TableRef, where: string | null): string {
@@ -77,7 +77,25 @@ export function buildCountQuery(engine: Engine, ref: TableRef, where: string | n
 const keyLabel = (key: CellChange[]): string =>
   `la fila con ${key.map((k) => `${k.column} = ${k.value === null ? 'NULL' : String(k.value)}`).join(', ')}`
 
-/** Sentencia con parámetros: `?` en MySQL, `@p0, @p1…` en SQL Server. */
+/**
+ * Marcador del parámetro: `?` en MySQL, `@p0, @p1…` en SQL Server (numerados en todo el lote, que va
+ * entero al servidor) y `$1, $2…` en PostgreSQL (numerados en cada sentencia, que va por separado).
+ */
+function placeholder(engine: Engine, batchIndex: number, statementIndex: number): string {
+  switch (engine) {
+    case 'mysql':
+      return '?'
+    case 'mssql':
+      return `@p${batchIndex}`
+    case 'postgres':
+      return `$${statementIndex + 1}`
+  }
+}
+
+const defaultValuesInsert = (engine: Engine, from: string): string =>
+  engine === 'mysql' ? `INSERT INTO ${from} () VALUES ()` : `INSERT INTO ${from} DEFAULT VALUES`
+
+/** Sentencia con parámetros: `?` en MySQL, `@p0, @p1…` en SQL Server, `$1, $2…` en PostgreSQL. */
 export interface ParamStatement {
   sql: string
   params: CellValue[]
@@ -92,12 +110,12 @@ export interface ParamStatement {
 export function buildUpdate(engine: Engine, ref: TableRef, update: RowUpdate, paramStart = 0): ParamStatement {
   const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
   const params: CellValue[] = []
-  const placeholder = (value: CellValue): string => {
+  const param = (value: CellValue): string => {
     params.push(value)
-    return engine === 'mysql' ? '?' : `@p${paramStart + params.length - 1}`
+    return placeholder(engine, paramStart + params.length - 1, params.length - 1)
   }
-  const set = update.set.map((c) => `${quoteIdent(c.column, engine)} = ${placeholder(c.value)}`).join(', ')
-  const where = update.key.map((c) => `${quoteIdent(c.column, engine)} = ${placeholder(c.value)}`).join(' AND ')
+  const set = update.set.map((c) => `${quoteIdent(c.column, engine)} = ${param(c.value)}`).join(', ')
+  const where = update.key.map((c) => `${quoteIdent(c.column, engine)} = ${param(c.value)}`).join(' AND ')
   return { sql: `UPDATE ${from} SET ${set} WHERE ${where}`, params, label: keyLabel(update.key) }
 }
 
@@ -121,24 +139,24 @@ export function mssqlDateParam(value: CellValue, dataType: string | undefined): 
 export function buildInsert(engine: Engine, ref: TableRef, set: CellChange[], paramStart = 0, label = 'la fila nueva'): ParamStatement {
   const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
   if (set.length === 0) {
-    return { sql: engine === 'mysql' ? `INSERT INTO ${from} () VALUES ()` : `INSERT INTO ${from} DEFAULT VALUES`, params: [], label }
+    return { sql: defaultValuesInsert(engine, from), params: [], label }
   }
   const params = set.map((c) => c.value)
   const columns = set.map((c) => quoteIdent(c.column, engine)).join(', ')
-  const values = set.map((_, i) => (engine === 'mysql' ? '?' : `@p${paramStart + i}`)).join(', ')
+  const values = set.map((_, i) => placeholder(engine, paramStart + i, i)).join(', ')
   return { sql: `INSERT INTO ${from} (${columns}) VALUES (${values})`, params, label }
 }
 
 /** DELETE de una fila localizada por su clave primaria. */
 export function buildDelete(engine: Engine, ref: TableRef, key: CellChange[], paramStart = 0): ParamStatement {
   const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
-  const where = key.map((k, i) => `${quoteIdent(k.column, engine)} = ${engine === 'mysql' ? '?' : `@p${paramStart + i}`}`).join(' AND ')
+  const where = key.map((k, i) => `${quoteIdent(k.column, engine)} = ${placeholder(engine, paramStart + i, i)}`).join(' AND ')
   return { sql: `DELETE FROM ${from} WHERE ${where}`, params: key.map((k) => k.value), label: keyLabel(key) }
 }
 
 export function previewInsert(engine: Engine, ref: TableRef, set: CellChange[]): string {
   const from = qualifiedName(engine, ref.database, { schema: ref.schema, name: ref.table })
-  if (set.length === 0) return engine === 'mysql' ? `INSERT INTO ${from} () VALUES ()` : `INSERT INTO ${from} DEFAULT VALUES`
+  if (set.length === 0) return defaultValuesInsert(engine, from)
   return `INSERT INTO ${from} (${set.map((c) => quoteIdent(c.column, engine)).join(', ')}) VALUES (${set.map((c) => sqlLiteral(c.value, engine)).join(', ')})`
 }
 

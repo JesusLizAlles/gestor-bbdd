@@ -1,6 +1,6 @@
 # Integración continua y versiones de Gestor BBDD.
 #
-# - Cada push a main y cada pull request: tipos, tests unitarios, de integración contra MariaDB y E2E.
+# - Cada push a main y cada pull request: tipos, tests unitarios, de integración contra MariaDB y PostgreSQL, y E2E.
 # - Al subir una etiqueta vX.Y.Z (que debe coincidir con "version" de package.json): además genera el
 #   AppImage (Linux), el instalador .exe (Windows) y los .dmg (macOS, arm64 y x64) y los deja en una
 #   Release en borrador. Al publicarla, las apps instaladas la detectan (electron-updater lee
@@ -43,6 +43,17 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 30
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ci-pg-pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     env:
       # Base de datos desechable del propio job: estas contraseñas no protegen nada real.
       TEST_MYSQL_HOST: 127.0.0.1
@@ -51,6 +62,12 @@ jobs:
       TEST_MYSQL_PASSWORD: ci-root-pass
       TEST_MYSQL_RO_USER: lector
       TEST_MYSQL_RO_PASSWORD: lector-ci-pass
+      TEST_PG_HOST: 127.0.0.1
+      TEST_PG_PORT: 5432
+      TEST_PG_USER: postgres
+      TEST_PG_PASSWORD: ci-pg-pass
+      TEST_PG_RO_USER: lector
+      TEST_PG_RO_PASSWORD: lector-ci-pass
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -63,6 +80,11 @@ jobs:
         run: >-
           mysql -h 127.0.0.1 -P 3306 -u root -p"$TEST_MYSQL_PASSWORD"
           -e "CREATE USER 'lector'@'%' IDENTIFIED BY '$TEST_MYSQL_RO_PASSWORD'; GRANT SELECT ON *.* TO 'lector'@'%';"
+
+      - name: Usuario sin permisos de escritura en PostgreSQL
+        run: >-
+          PGPASSWORD="$TEST_PG_PASSWORD" psql -h 127.0.0.1 -p 5432 -U postgres -d postgres
+          -c "CREATE ROLE lector LOGIN PASSWORD '$TEST_PG_RO_PASSWORD'"
 
       - run: npm run typecheck
       - run: npm test

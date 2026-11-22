@@ -78,7 +78,7 @@ export function buildManifest(opts: Pick<BundleOptions, 'version' | 'dataDir' | 
     name: 'gestor-bbdd',
     display_name: 'Gestor BBDD',
     version: opts.version,
-    description: 'Consulta y analiza las bases de datos MySQL/MariaDB y SQL Server que tienes en Gestor BBDD.',
+    description: 'Consulta y analiza las bases de datos MySQL/MariaDB, SQL Server y PostgreSQL que tienes en Gestor BBDD.',
     long_description:
       'Conecta Claude con Gestor BBDD. Claude solo ve las conexiones a las que le des acceso en Gestor BBDD ' +
       '(Ajustes → Servidor MCP), con el nivel que elijas: solo lectura, escritura con tu aprobación o escritura ' +
@@ -98,7 +98,7 @@ export function buildManifest(opts: Pick<BundleOptions, 'version' | 'dataDir' | 
       }
     },
     tools: opts.tools.map((t) => ({ name: t.name, description: t.description })),
-    keywords: ['database', 'sql', 'mysql', 'mariadb', 'sqlserver', 'mssql'],
+    keywords: ['database', 'sql', 'mysql', 'mariadb', 'sqlserver', 'mssql', 'postgresql', 'postgres'],
     license: 'MIT',
     compatibility: { platforms: ['darwin', 'win32', 'linux'], runtimes: { node: '>=18.0.0' } }
   }

@@ -1,6 +1,6 @@
 # Gestor BBDD
 
-Gestor de bases de datos de escritorio para **MySQL/MariaDB** y **SQL Server**, inspirado en DataGrip. Admite conexión
+Gestor de bases de datos de escritorio para **MySQL/MariaDB**, **SQL Server** y **PostgreSQL**, inspirado en DataGrip. Admite conexión
 directa por IP, TLS y **túnel SSH**. Está hecho con Electron, TypeScript y React.
 
 Es un proyecto de código abierto con [licencia MIT](LICENSE). Los instaladores para Linux (AppImage), Windows y macOS están en
@@ -59,7 +59,7 @@ se genera por detrás.
   - Si hay cambios sin guardar, se avisa antes de cambiar de página, orden o filtro.
 - **Estructura** de cada tabla: columnas, índices, claves foráneas (con enlace a la tabla referenciada) y DDL. Se edita directamente:
   - Columnas: nombre, tipo (con sugerencias), nulos, valor por defecto (expresión SQL: `'texto'`, `0`, `CURRENT_TIMESTAMP`…),
-    autoincremento, clave primaria (🔑) y, en MySQL, comentario. «+ Añadir columna» la añade al final; − la borra.
+    autoincremento, clave primaria (🔑) y, en MySQL y PostgreSQL, comentario. «+ Añadir columna» la añade al final; − la borra.
   - Índices: añadir, cambiar (nombre, columnas separadas por comas, único) y borrar. Claves foráneas: borrar.
   - Los cambios quedan resaltados (modificado, nuevo, tachado) y se validan al escribir. **<kbd>Alt</kbd>+<kbd>Enter</kbd>**
     o «Revisar SQL…» enseña las sentencias generadas; se aplican, se copian o se abren en una consola. «Descartar» lo deshace todo.
@@ -67,6 +67,9 @@ se genera por detrás.
     intercalación, comentario, `ON UPDATE` y expresión si es calculada (las calculadas solo se renombran o se borran).
   - SQL Server: todo en una transacción. Renombra con `sp_rename`, cambia los `DEFAULT` por su nombre de restricción y quita y
     vuelve a crear la clave primaria o los índices que impiden un `ALTER COLUMN`.
+  - PostgreSQL: todo en una transacción (su DDL también se deshace). Una sentencia por cambio (`RENAME COLUMN`, `TYPE`,
+    `SET/DROP DEFAULT`, `SET/DROP NOT NULL`, `COMMENT ON`…); conserva la intercalación al cambiar el tipo y permite poner o
+    quitar `IDENTITY` en columnas existentes (la secuencia sigue al valor más alto). Si falla, el error trae la pista del servidor.
   - Si la tabla ha cambiado desde que se cargó (otra persona, otra consola), no se aplica nada y se pide recargar.
   - En producción, el botón es «Aplicar en producción». No se edita en vistas ni en conexiones de solo lectura.
 - **Consola SQL** (botón ⌨ junto a la conexión o a una base de datos, o «Consola» desde una tabla):
@@ -74,7 +77,7 @@ se genera por detrás.
   - «Consola» desde una tabla (o «Consola con SELECT de todas las columnas» en su clic derecho) abre una **consola aparte** de esa base de datos, con el nombre de la tabla, y añade el `SELECT` al final. Si ya estaba abierta, se reutiliza y pasa a llamarse como la última tabla. No se guarda: al cerrarla se pierde, y así no se mezcla con lo escrito en la principal. Lo que se ejecuta en ella sí entra en el historial de consultas.
   - Selector de base de datos. El autocompletado ofrece las tablas y columnas de la base elegida.
   - Entiende alias: tras `r.` en `FROM reservas r` solo sugiere columnas de `reservas`. Prioriza las columnas de las tablas que ya están en la consulta.
-  - <kbd>Ctrl</kbd>+<kbd>Enter</kbd> ejecuta la sentencia bajo el cursor (o la selección); <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> ejecuta todo. Respeta `DELIMITER` (MySQL) y `GO` (SQL Server).
+  - <kbd>Ctrl</kbd>+<kbd>Enter</kbd> ejecuta la sentencia bajo el cursor (o la selección); <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> ejecuta todo. Respeta `DELIMITER` (MySQL), `GO` (SQL Server) y los cuerpos `$$ … $$` (PostgreSQL).
   - Resultados en pestañas, límite de filas aplicado en el servidor, cancelar y exportar.
   - En conexiones de solo lectura bloquea las escrituras; en producción pide confirmación.
   - Tras un `CREATE`, `ALTER` o `DROP`, el autocompletado se recarga.
@@ -108,7 +111,7 @@ recibe lo que devuelven las consultas.
 | Nivel | Qué puede hacer el agente |
 | --- | --- |
 | Sin acceso | No ve la conexión. |
-| Solo lectura | `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`. Su sesión se abre como de solo lectura (en MySQL/MariaDB, también en el servidor). |
+| Solo lectura | `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `EXPLAIN`. Su sesión se abre como de solo lectura (en MySQL/MariaDB y PostgreSQL, también en el servidor). |
 | Escritura con mi aprobación | Además, modificar datos y estructura: la app enseña el SQL y no se ejecuta hasta pulsar «Ejecutar» (5 minutos para responder; si no, se rechaza). |
 | Escritura sin preguntar | Igual, sin confirmación. No se ofrece en producción ni en conexiones de solo lectura. |
 
@@ -219,7 +222,7 @@ La versión 0.2.0 no incluye el actualizador: hay que instalar a mano una vez la
 ┌──────────────── Proceso principal (Node) ────────────────┐      ┌──── Renderer (sandbox) ────┐
 │ ipc.ts       valida cada llamada con zod                 │ IPC  │ React + Monaco             │
 │ sessions.ts  túnel + driver, solo lectura, producción    │◀────▶│ Sin acceso a Node ni red   │
-│ drivers/     mysql2 · mssql (tedious)                    │      │ CSP: solo recursos propios │
+│ drivers/     mysql2 · mssql (tedious) · pg               │      │ CSP: solo recursos propios │
 │ ssh/         ssh2: reenvío local + huellas conocidas     │      └────────────────────────────┘
 │ store/       connections.json · secrets.json (cifrado)   │
 └──────────────────────────────────────────────────────────┘
@@ -269,6 +272,10 @@ mariadbd --no-defaults --datadir=$D/data --port=3407 --bind-address=127.0.0.1 --
 mariadb --no-defaults -S $D/sock -u root -e "CREATE USER 'gestor'@'127.0.0.1' IDENTIFIED BY 'gestor-pass'; GRANT ALL ON *.* TO 'gestor'@'127.0.0.1';"
 ```
 
+**Integración con PostgreSQL.** Crea y borra la base de datos `gestor_bbdd_test` (y el esquema `ventas` dentro), así que
+**no lo lances contra producción**: `TEST_PG_HOST`, `TEST_PG_PORT`, `TEST_PG_USER`, `TEST_PG_PASSWORD` (usuario que pueda crear
+bases de datos) y, opcionalmente, `TEST_PG_RO_USER` y `TEST_PG_RO_PASSWORD` (usuario sin permisos de escritura).
+
 **Integración con SQL Server.** Solo usa tablas `#temporales` y vistas del sistema, pero mejor contra un servidor de desarrollo:
 `TEST_MSSQL_HOST`, `TEST_MSSQL_PORT`, `TEST_MSSQL_USER`, `TEST_MSSQL_PASSWORD` y, opcionalmente, `TEST_MSSQL_DATABASE` y `TEST_MSSQL_TLS=1`.
 
@@ -287,7 +294,7 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
 - Contraseñas con `safeStorage`. En Linux, si el sistema solo ofrece `basic_text` (clave fija), no se escriben en disco.
 - Solo lectura en dos capas:
   - En la app: clasificación conservadora de cada sentencia.
-  - En MySQL/MariaDB, además, `SET SESSION TRANSACTION READ ONLY` en el servidor.
+  - En MySQL/MariaDB y PostgreSQL, además, transacciones `READ ONLY` en el servidor.
 - Servidor MCP:
   - Desactivado por defecto y sin acceso a ninguna conexión hasta que se le da.
   - Solo escucha en `127.0.0.1` y exige un token aleatorio de 256 bits en cada petición.
@@ -305,6 +312,13 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
   - En la rejilla, los `DECIMAL` se muestran como número de JavaScript: se pierde precisión por encima de 15–16 cifras.
   - El modo solo lectura se aplica solo en la app. Para una garantía total, usa un usuario de solo lectura.
   - Si un SELECT supera el límite de filas dentro de un bloque `BEGIN…END`, se cancela el resto del bloque.
+- **PostgreSQL:**
+  - Una conexión solo ve una base de datos: la app abre una (y otra para metadatos) por cada base de datos que se usa.
+    Lo que dependa de la sesión (`SET`, tablas temporales, transacciones) es de cada base de datos.
+  - Sin base de datos indicada, se conecta a `postgres`.
+  - `COPY … FROM STDIN` / `TO STDOUT` no se admiten en la consola (sí `COPY` con ficheros del servidor).
+  - Las tablas `serial` muestran su `DEFAULT nextval(…)`; la rejilla las trata como autoincrementales.
+  - Quitar o cambiar una clave primaria a la que apuntan claves foráneas de otras tablas falla (no se usa `CASCADE`): no se cambia nada.
 - **SSH:**
   - Sin saltos encadenados (*jump hosts*) y sin leer `~/.ssh/config`.
   - La primera conexión acepta la huella automáticamente. Se muestra en «Probar conexión» y en la barra de estado.
@@ -320,6 +334,7 @@ Ayuda de desarrollo: con `GESTOR_SCREENSHOT=/ruta.png npm start` la app guarda u
   - Las columnas nuevas van al final; no se reordenan columnas.
   - No crea claves foráneas ni edita CHECK, particiones u opciones de tabla: para eso, la consola («Abrir en consola» parte del SQL generado).
   - SQL Server: no se puede poner ni quitar `IDENTITY` en una columna existente, ni editar comentarios (`MS_Description`).
+  - PostgreSQL: al cambiar un índice se vuelve a crear como índice normal (se pierden método, `WHERE` parcial o `INCLUDE`).
 - **Visor:**
   - Ordena por una sola columna a la vez.
   - El filtro admite subconsultas de lectura.

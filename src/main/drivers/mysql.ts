@@ -12,7 +12,7 @@ import type {
 import type { ParamStatement } from '@shared/table-query'
 import { COMPLETION_COLUMN_LIMIT } from '@shared/completion'
 import { groupBy } from './group'
-import { DdlError, friendlyDbError } from './errors'
+import { DdlError, friendlyDbError, rowChangedError } from './errors'
 import type { DbDriver, DriverConnectOptions, ExecuteOptions } from './types'
 import { normalizeValue } from './values'
 
@@ -65,13 +65,7 @@ export function mysqlDefault(def: string | null, extra: string, type: string, ma
   return `'${def.replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
 }
 
-export function rowChangedError(label: string, affected: number): Error {
-  return new Error(
-    affected === 0
-      ? `No se guardó nada: ${label} ya no existe o su clave ha cambiado. Recarga la tabla.`
-      : `No se guardó nada: el cambio de ${label} afectaría a ${affected} filas en lugar de a una.`
-  )
-}
+export { rowChangedError }
 
 /**
  * MySQL / MariaDB sobre mysql2. Usa dos conexiones: una para las consultas del usuario

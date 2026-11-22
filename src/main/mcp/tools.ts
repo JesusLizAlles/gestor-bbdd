@@ -14,6 +14,7 @@ import type {
   TableRef,
   TableStructure
 } from '@shared/types'
+import { DEFAULT_SCHEMA } from '@shared/types'
 
 /** Lo que las herramientas necesitan del resto de la app. */
 export interface ToolBackend {
@@ -136,7 +137,7 @@ function formatResults(results: QueryResult[], maxRows: number): { results: Resu
 }
 
 function tableRef(config: ConnectionConfig, database: string, table: string, schema: string | undefined): TableRef {
-  return { database, table, schema: schema ?? (config.engine === 'mssql' ? 'dbo' : null) }
+  return { database, table, schema: schema ?? DEFAULT_SCHEMA[config.engine] }
 }
 
 const summarizeSql = (sql: string): string => sql.replace(/\s+/g, ' ').trim().slice(0, 300)
@@ -151,7 +152,7 @@ const tools = [
     title: 'Conexiones disponibles',
     description:
       'Lista las conexiones de base de datos a las que el usuario te ha dado acceso en Gestor BBDD, con su motor ' +
-      '(mysql = MySQL/MariaDB, mssql = SQL Server), entorno (dev, test, prod) y nivel de acceso. Empieza siempre por aquí.',
+      '(mysql = MySQL/MariaDB, mssql = SQL Server, postgres = PostgreSQL), entorno (dev, test, prod) y nivel de acceso. Empieza siempre por aquí.',
     input: z.object({}),
     readOnly: true,
     describe: () => ({ connection: null, summary: '' }),
@@ -185,7 +186,7 @@ const tools = [
   define({
     name: 'list_tables',
     title: 'Tablas y vistas',
-    description: 'Lista las tablas y vistas de una base de datos (en SQL Server, con su esquema).',
+    description: 'Lista las tablas y vistas de una base de datos (en SQL Server y PostgreSQL, con su esquema).',
     input: z.object({ connection: connectionArg, database: databaseArg.describe('Base de datos') }),
     readOnly: true,
     describe: (a) => ({ connection: a.connection, summary: a.database }),
@@ -203,7 +204,7 @@ const tools = [
       connection: connectionArg,
       database: databaseArg.describe('Base de datos'),
       table: z.string().min(1).max(256).describe('Nombre de la tabla o vista'),
-      schema: z.string().min(1).max(256).optional().describe('Solo SQL Server: esquema (dbo si no se indica)')
+      schema: z.string().min(1).max(256).optional().describe('SQL Server y PostgreSQL: esquema (dbo o public si no se indica)')
     }),
     readOnly: true,
     describe: (a) => ({ connection: a.connection, summary: `${a.database}.${a.schema ? `${a.schema}.` : ''}${a.table}` }),
@@ -260,7 +261,7 @@ const tools = [
     description:
       'Ejecuta consultas de solo lectura (SELECT, WITH, SHOW, DESCRIBE, EXPLAIN) y devuelve columnas y filas en JSON. ' +
       'Puede llevar varias sentencias separadas por «;». Rechaza cualquier escritura: para eso está execute_sql. ' +
-      'Las filas tienen un máximo por consulta: usa LIMIT (MySQL) o TOP (SQL Server) y agrega en SQL en vez de traer tablas enteras.',
+      'Las filas tienen un máximo por consulta: usa LIMIT (MySQL, PostgreSQL) o TOP (SQL Server) y agrega en SQL en vez de traer tablas enteras.',
     input: z.object({
       connection: connectionArg,
       sql: z.string().min(1).max(1_000_000).describe('SQL en el dialecto del motor de la conexión'),

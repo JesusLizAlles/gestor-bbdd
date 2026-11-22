@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { qualifiedName, toCsv, toJson, toSqlInserts } from '@shared/format'
+import { qualifiedName, tableLabel as schemaTableLabel, toCsv, toJson, toSqlInserts } from '@shared/format'
 import { buildSelectColumns, equalsCondition } from '@shared/table-query'
 import type {
   CellValue,
+  ColumnInfo,
   ConnectionSummary,
   ForeignKeyInfo,
   ObjectKind,
@@ -64,7 +65,10 @@ interface Changes {
 const NO_CHANGES: Changes = { edits: new Map(), newRows: 0, deleted: new Set() }
 const hasChanges = (c: Changes): boolean => c.edits.size > 0 || c.newRows > 0 || c.deleted.size > 0
 
-const tableLabel = (ref: TableRef) => (ref.schema && ref.schema !== 'dbo' ? `${ref.schema}.${ref.table}` : ref.table)
+const tableLabel = (ref: TableRef) => schemaTableLabel(ref.schema, ref.table)
+
+/** El servidor pone el valor al insertar: AUTO_INCREMENT, IDENTITY o, en PostgreSQL, serial (DEFAULT nextval(…)). */
+const serverGenerated = (c: ColumnInfo): boolean => c.autoIncrement || /^nextval\(/i.test(c.defaultValue ?? '')
 
 /** Visor de una tabla al estilo DataGrip: los datos son la pantalla; la SQL se genera por detrás. */
 export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsole, onOpenQuickConsole }: Props) {
@@ -256,7 +260,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
       (page?.columns ?? []).map((c) => {
         const info = ready?.columns.find((x) => x.name === c.name)
         if (!info) return ''
-        if (info.autoIncrement) return '(auto)'
+        if (serverGenerated(info)) return '(auto)'
         if (info.defaultValue !== null && info.defaultValue.toUpperCase() !== 'NULL') return `(${info.defaultValue})`
         return info.nullable ? 'NULL' : '(obligatorio)'
       }),
@@ -301,7 +305,7 @@ export function TableView({ tab, active, filterRequest, onNavigate, onOpenConsol
       values.forEach((value, j) => {
         const c = col + j
         const info = ready?.columns.find((x) => x.name === page.columns[c]?.name)
-        if (c >= page.columns.length || (r >= base && info?.autoIncrement)) return
+        if (c >= page.columns.length || (r >= base && info && serverGenerated(info))) return
         setEdit(edits, r, c, value)
         count++
       })

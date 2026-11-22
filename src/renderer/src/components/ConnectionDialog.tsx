@@ -168,6 +168,7 @@ export function ConnectionDialog({ initial, secretStatus, onClose, onSaved }: Pr
               <select id="conn-engine" value={draft.engine} onChange={(e) => changeEngine(e.target.value as Engine)}>
                 <option value="mysql">MySQL / MariaDB</option>
                 <option value="mssql">SQL Server</option>
+                <option value="postgres">PostgreSQL</option>
               </select>
               <label htmlFor="conn-host">Servidor</label>
               <div className="row">
@@ -197,7 +198,12 @@ export function ConnectionDialog({ initial, secretStatus, onClose, onSaved }: Pr
               <input id="conn-user" value={draft.username} autoComplete="off" onChange={(e) => set('username', e.target.value)} />
               <SecretField label="Contraseña" name="password" stored={stored.has('password')} values={secrets} onChange={setSecrets} />
               <label htmlFor="conn-db">Base de datos</label>
-              <input id="conn-db" value={draft.database ?? ''} placeholder="opcional" onChange={(e) => set('database', e.target.value)} />
+              <input
+                id="conn-db"
+                value={draft.database ?? ''}
+                placeholder={draft.engine === 'postgres' ? 'opcional (postgres si no se indica)' : 'opcional'}
+                onChange={(e) => set('database', e.target.value)}
+              />
             </div>
           )}
 
@@ -306,7 +312,7 @@ export function ConnectionDialog({ initial, secretStatus, onClose, onSaved }: Pr
                 Solo lectura (bloquea INSERT, UPDATE, DELETE, DDL…)
               </label>
               <div className="note full">
-                En MySQL/MariaDB el modo solo lectura también se aplica en el servidor (SET SESSION TRANSACTION READ ONLY).
+                En MySQL/MariaDB y PostgreSQL el modo solo lectura también se aplica en el servidor (transacciones READ ONLY).
                 En SQL Server se filtra en la app: para una garantía total usa un usuario con permisos solo de lectura.
               </div>
             </div>

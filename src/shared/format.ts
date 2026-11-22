@@ -1,14 +1,42 @@
 // Formateo de resultados para exportar y nombres cualificados por motor. Sin dependencias.
 import type { CellValue, Engine, QueryResult, TableInfo } from './types'
+import { DEFAULT_SCHEMA } from './types'
+
+const DEFAULT_SCHEMAS = new Set(Object.values(DEFAULT_SCHEMA).filter((s): s is string => s !== null))
+
+/** ¿Es el esquema por defecto (dbo, public)? Entonces no se enseña delante del nombre de la tabla. */
+export const isDefaultSchema = (schema: string | null): boolean => schema === null || DEFAULT_SCHEMAS.has(schema)
+
+/** Nombre de una tabla para la interfaz: con su esquema si no es el de por defecto. */
+export const tableLabel = (schema: string | null, name: string): string => (isDefaultSchema(schema) ? name : `${schema}.${name}`)
 
 export function quoteIdent(name: string, engine: Engine): string {
-  return engine === 'mysql' ? `\`${name.replace(/`/g, '``')}\`` : `[${name.replace(/]/g, ']]')}]`
+  switch (engine) {
+    case 'mysql':
+      return `\`${name.replace(/`/g, '``')}\``
+    case 'mssql':
+      return `[${name.replace(/]/g, ']]')}]`
+    case 'postgres':
+      return `"${name.replace(/"/g, '""')}"`
+  }
 }
 
+/**
+ * Nombre completo de una tabla. En PostgreSQL no se pueden mezclar bases de datos en una consulta:
+ * el nombre lleva solo el esquema y la sesión se sitúa antes en la base de datos (ver usesDatabaseInNames).
+ */
 export function qualifiedName(engine: Engine, database: string, table: Pick<TableInfo, 'schema' | 'name'>): string {
-  const parts = engine === 'mysql' ? [database, table.name] : [database, table.schema ?? 'dbo', table.name]
+  const parts =
+    engine === 'mysql'
+      ? [database, table.name]
+      : engine === 'mssql'
+        ? [database, table.schema ?? 'dbo', table.name]
+        : [table.schema ?? 'public', table.name]
   return parts.map((p) => quoteIdent(p, engine)).join('.')
 }
+
+/** false si el motor no admite la base de datos en los nombres (PostgreSQL): hay que cambiar de base de datos antes. */
+export const usesDatabaseInNames = (engine: Engine): boolean => engine !== 'postgres'
 
 function csvCell(value: CellValue, separator: string): string {
   if (value === null) return ''
@@ -42,9 +70,11 @@ export function toJson(result: QueryResult): string {
 export function sqlLiteral(value: CellValue, engine: Engine): string {
   if (value === null) return 'NULL'
   if (typeof value === 'number') return String(value)
-  if (typeof value === 'boolean') return value ? '1' : '0'
+  if (typeof value === 'boolean') return engine === 'postgres' ? (value ? 'TRUE' : 'FALSE') : value ? '1' : '0'
   let escaped = value.replace(/'/g, "''")
   if (engine === 'mysql') escaped = escaped.replace(/\\/g, '\\\\')
+  // En PostgreSQL la barra invertida solo escapa según standard_conforming_strings; con E'…' siempre.
+  if (engine === 'postgres' && escaped.includes('\\')) return `E'${escaped.replace(/\\/g, '\\\\')}'`
   return engine === 'mssql' ? `N'${escaped}'` : `'${escaped}'`
 }
 

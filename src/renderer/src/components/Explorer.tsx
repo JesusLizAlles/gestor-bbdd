@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { tableLabel as schemaTableLabel } from '@shared/format'
 import { buildSelectColumns } from '@shared/table-query'
 import type { ColumnInfo, Engine, SessionInfo, TableInfo, TableRef } from '@shared/types'
 import { onSchemaChanged } from '../lib/schema-events'
@@ -24,7 +25,7 @@ type Loadable<T> = { state: 'loading' } | { state: 'ready'; value: T } | { state
 
 const tableKey = (db: string, t: TableInfo) => `${db}\u0000${t.schema ?? ''}\u0000${t.name}`
 const groupKey = (db: string, kind: TableInfo['kind']) => `group:${kind}:${db}`
-const tableLabel = (t: TableInfo) => (t.schema && t.schema !== 'dbo' ? `${t.schema}.${t.name}` : t.name)
+const tableLabel = (t: TableInfo) => schemaTableLabel(t.schema, t.name)
 
 function Row(props: {
   depth: number

@@ -3,8 +3,10 @@ import * as monaco from 'monaco-editor/editor/editor.api.js'
 import 'monaco-editor/features/register.all.js'
 import 'monaco-editor/languages/definitions/mysql/register.js'
 import 'monaco-editor/languages/definitions/sql/register.js'
+import 'monaco-editor/languages/definitions/pgsql/register.js'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 import { tableAliases } from '@shared/completion'
+import { isDefaultSchema } from '@shared/format'
 import type { CompletionColumn, Engine } from '@shared/types'
 
 self.MonacoEnvironment = { getWorker: () => new EditorWorker() }
@@ -16,7 +18,8 @@ monaco.editor.defineTheme('gestor-dark', {
   colors: { 'editor.background': '#1e1f22', 'editor.lineHighlightBackground': '#26282e' }
 })
 
-export const languageFor = (engine: Engine): string => (engine === 'mysql' ? 'mysql' : 'sql')
+const LANGUAGES: Record<Engine, string> = { mysql: 'mysql', mssql: 'sql', postgres: 'pgsql' }
+export const languageFor = (engine: Engine): string => LANGUAGES[engine]
 
 /** Datos que usa el autocompletado; los actualiza la consola activa. */
 export interface CompletionSource {
@@ -37,7 +40,7 @@ const KEYWORDS = [
   'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'NULL', 'IS', 'IN', 'LIKE', 'BETWEEN', 'EXISTS',
   'JOIN', 'INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'ON', 'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT',
   'DISTINCT', 'AS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'UNION', 'UNION ALL', 'INSERT INTO',
-  'VALUES', 'UPDATE', 'SET', 'DELETE FROM', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DESC', 'ASC', 'TOP'
+  'VALUES', 'UPDATE', 'SET', 'DELETE FROM', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'DESC', 'ASC', 'TOP', 'OFFSET', 'RETURNING', 'ILIKE'
 ]
 
 let registered = false
@@ -46,7 +49,7 @@ let registered = false
 export function registerCompletion(): void {
   if (registered) return
   registered = true
-  for (const language of ['mysql', 'sql']) {
+  for (const language of Object.values(LANGUAGES)) {
     monaco.languages.registerCompletionItemProvider(language, {
       triggerCharacters: ['.'],
       async provideCompletionItems(model, position) {
@@ -62,7 +65,7 @@ export function registerCompletion(): void {
         const tableSuggestion = (t: CompletionSource['tables'][number], sort: string) => ({
           label: t.name,
           kind: K.Struct,
-          detail: t.schema && t.schema !== 'dbo' ? `tabla · ${t.schema}` : 'tabla',
+          detail: isDefaultSchema(t.schema) ? 'tabla' : `tabla · ${t.schema}`,
           insertText: t.name,
           range,
           sortText: `${sort}${t.name}`

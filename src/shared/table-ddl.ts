@@ -1,6 +1,7 @@
 // SQL del editor de estructura. Puro y sin dependencias: la interfaz lo usa para la vista previa y
 // el proceso principal lo vuelve a generar con la estructura recién leída antes de ejecutarlo.
 import { qualifiedName, quoteIdent, sqlLiteral } from './format'
+import { DOLLAR_QUOTE, isEscapeStringPrefix } from './sql'
 import type { ColumnDesign, ColumnInfo, Engine, IndexDesign, IndexInfo, TableDesign, TableRef, TableStructure } from './types'
 
 export function designFromStructure(s: TableStructure): TableDesign {
@@ -47,11 +48,16 @@ export function checkSqlFragment(text: string, engine: Engine): string | null {
   let depth = 0
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]!
+    // Dentro de `$$ … $$` las comillas no cuentan: más simple y seguro no admitirlas.
+    if (engine === 'postgres' && ch === '$' && !/[\w$]/.test(text[i - 1] ?? ' ') && DOLLAR_QUOTE.test(text.slice(i))) {
+      return 'No puede llevar cadenas con $$'
+    }
     const close = ch === "'" || ch === '"' ? ch : ch === '`' && engine === 'mysql' ? '`' : ch === '[' && engine === 'mssql' ? ']' : null
     if (close) {
+      const backslash = (engine === 'mysql' && close !== '`') || (engine === 'postgres' && close === "'" && isEscapeStringPrefix(text, i))
       let j = i + 1
       for (; j < text.length; j++) {
-        if (engine === 'mysql' && close !== '`' && text[j] === '\\') j++
+        if (backslash && text[j] === '\\') j++
         else if (text[j] === close) {
           if (text[j + 1] === close && close !== ']') j++
           else break
@@ -99,11 +105,15 @@ export function unwrapParens(expr: string): string {
 }
 
 const TYPE_PATTERN = /^[a-z_][\w ]*(\(.*\))?[\w ]*$/is
-const isTextType = (type: string): boolean => /^\s*(n?(var)?char|n?text|tinytext|mediumtext|longtext|enum|set)\b/i.test(type)
+// PostgreSQL: también esquema.tipo, "Tipo" entre comillas y arrays (integer[], text[][]).
+const PG_TYPE_PATTERN = /^(?:"[^"]+"|[a-z_][\w$]*)(?:\s*\.\s*(?:"[^"]+"|[a-z_][\w$]*))?[\w ]*(?:\(.*\))?[\w ]*(?:\s*\[\d*\])*$/is
+const isTextType = (type: string): boolean =>
+  /^\s*(n?(var)?char|character|n?text|tinytext|mediumtext|longtext|enum|set|citext)\b/i.test(type)
 const hasCharset = (type: string): boolean => /\b(collate|character\s+set|charset)\b/i.test(type)
 const normType = (type: string): string => type.trim().replace(/\s+/g, ' ').toLowerCase()
 const normDefault = (value: string | null): string | null => (value === null || value.trim() === '' ? null : value.trim())
-const maxIdent = (engine: Engine): number => (engine === 'mysql' ? 64 : 128)
+const MAX_IDENT: Record<Engine, number> = { mysql: 64, mssql: 128, postgres: 63 }
+const maxIdent = (engine: Engine): number => MAX_IDENT[engine]
 
 export interface DesignIssue {
   scope: 'column' | 'index'
@@ -147,8 +157,11 @@ export function validateDesign(engine: Engine, structure: TableStructure, design
       if (ch.definition || ch.identity || ch.defaultValue) add('dataType', 'Columna calculada: solo se puede renombrar o borrar')
       return
     }
+    // El tipo que ya tiene la columna lo dio el servidor: solo se valida si se cambia.
+    const typeChanged = !info || normType(c.dataType) !== normType(info.dataType)
+    const pattern = engine === 'postgres' ? PG_TYPE_PATTERN : TYPE_PATTERN
     if (!c.dataType.trim()) add('dataType', 'Falta el tipo')
-    else if (!TYPE_PATTERN.test(c.dataType.trim()) || checkSqlFragment(c.dataType, engine)) add('dataType', 'Tipo no válido')
+    else if (typeChanged && (!pattern.test(c.dataType.trim()) || checkSqlFragment(c.dataType, engine))) add('dataType', 'Tipo no válido')
     const def = normDefault(c.defaultValue)
     if (def !== null) {
       const problem = checkSqlFragment(def, engine)
@@ -156,6 +169,7 @@ export function validateDesign(engine: Engine, structure: TableStructure, design
       else if (c.autoIncrement) add('defaultValue', 'Una columna autoincremental no lleva valor por defecto')
     }
     if (c.primaryKey && c.nullable) add('nullable', 'La clave primaria no admite nulos')
+    else if (engine === 'postgres' && c.autoIncrement && c.nullable) add('nullable', 'Una columna IDENTITY no admite nulos')
     if (engine === 'mssql' && info && c.autoIncrement !== info.autoIncrement) {
       add('autoIncrement', 'SQL Server no permite poner o quitar IDENTITY en una columna existente')
     }
@@ -339,6 +353,74 @@ function mssqlStatements(ref: TableRef, d: DesignDiff, structure: TableStructure
   return out
 }
 
+function pgColumnType(c: ColumnDesign, info: ColumnInfo | undefined): string {
+  const type = c.dataType.trim()
+  // Sin COLLATE, ALTER COLUMN … TYPE pondría la intercalación por defecto del tipo nuevo.
+  const collate = info?.collation && isTextType(type) && !hasCharset(type) ? ` COLLATE ${quoteIdent(info.collation, 'postgres')}` : ''
+  return `${type}${collate}`
+}
+
+/**
+ * PostgreSQL: una sentencia por cambio, que se ejecutan en una transacción (el DDL de PostgreSQL se
+ * deshace entero si algo falla). Al cambiar el tipo, PostgreSQL rehace solo los índices y la clave.
+ */
+function pgStatements(ref: TableRef, d: DesignDiff): string[] {
+  const table = qualifiedName('postgres', ref.database, { schema: ref.schema, name: ref.table })
+  const q = (name: string) => quoteIdent(name, 'postgres')
+  const schema = q(ref.schema ?? 'public')
+  const alter = (clause: string) => `ALTER TABLE ${table} ${clause}`
+  const comment = (column: string, text: string | null) =>
+    `COMMENT ON COLUMN ${table}.${q(column)} IS ${text ? sqlLiteral(text, 'postgres') : 'NULL'}`
+  const out: string[] = []
+
+  for (const fk of d.dropForeignKeys) out.push(alter(`DROP CONSTRAINT ${q(fk)}`))
+  for (const ix of [...d.droppedIndexes, ...d.changedIndexes.map((c) => c.info)]) {
+    // Los índices son objetos del esquema; los UNIQUE creados como restricción se quitan con la tabla.
+    out.push(ix.uniqueConstraint ? alter(`DROP CONSTRAINT ${q(ix.name)}`) : `DROP INDEX ${schema}.${q(ix.name)}`)
+  }
+  if (d.pkChanged && d.primary) out.push(alter(`DROP CONSTRAINT ${q(d.primary.name)}`))
+  for (const c of d.droppedColumns) out.push(alter(`DROP COLUMN ${q(c.name)}`))
+  for (const { design: c, info, changes } of d.changedColumns) {
+    if (changes.renamed) out.push(alter(`RENAME COLUMN ${q(info.name)} TO ${q(c.name.trim())}`))
+  }
+  for (const { design: c, info, changes } of d.changedColumns) {
+    const name = c.name.trim()
+    const column = (clause: string) => alter(`ALTER COLUMN ${q(name)} ${clause}`)
+    const def = normDefault(c.defaultValue)
+    if (changes.identity && info.autoIncrement) out.push(column('DROP IDENTITY'))
+    // El DEFAULT viejo se quita antes de cambiar el tipo: si no se puede convertir, el cambio de tipo fallaría.
+    if (changes.defaultValue && info.defaultValue !== null) out.push(column('DROP DEFAULT'))
+    if (normType(c.dataType) !== normType(info.dataType)) out.push(column(`TYPE ${pgColumnType(c, info)}`))
+    if (changes.defaultValue && def !== null) out.push(column(`SET DEFAULT ${def}`))
+    if (c.nullable !== info.nullable) out.push(column(c.nullable ? 'DROP NOT NULL' : 'SET NOT NULL'))
+    if (changes.identity && c.autoIncrement) {
+      out.push(column('ADD GENERATED BY DEFAULT AS IDENTITY'))
+      // La secuencia nueva empieza en 1: se pone detrás del valor más alto para no repetir claves.
+      out.push(
+        `SELECT setval(pg_get_serial_sequence(${sqlLiteral(table, 'postgres')}, ${sqlLiteral(name, 'postgres')}), ` +
+          `COALESCE(MAX(${q(name)}), 0) + 1, false) FROM ${table}`
+      )
+    }
+    if (changes.comment) out.push(comment(name, c.comment))
+  }
+  for (const c of d.newColumns) {
+    const def = normDefault(c.defaultValue)
+    const identity = c.autoIncrement ? ' GENERATED BY DEFAULT AS IDENTITY' : ''
+    out.push(alter(`ADD COLUMN ${q(c.name.trim())} ${pgColumnType(c, undefined)}${identity}${c.nullable ? '' : ' NOT NULL'}${def !== null ? ` DEFAULT ${def}` : ''}`))
+    if (c.comment) out.push(comment(c.name.trim(), c.comment))
+  }
+  if (d.pkChanged && d.newPk.length) {
+    out.push(alter(`ADD CONSTRAINT ${q(d.primary?.name ?? `${ref.table}_pkey`)} PRIMARY KEY (${columnList('postgres', d.newPk)})`))
+  }
+  const create = (name: string, columns: string[], unique: boolean, constraint = false) =>
+    unique && constraint
+      ? alter(`ADD CONSTRAINT ${q(name)} UNIQUE (${columnList('postgres', columns)})`)
+      : `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(name)} ON ${table} (${columnList('postgres', columns)})`
+  for (const { design: ix, info } of d.changedIndexes) out.push(create(ix.name.trim(), ix.columns, ix.unique, info.uniqueConstraint))
+  for (const ix of d.newIndexes) out.push(create(ix.name.trim(), ix.columns, ix.unique))
+  return out
+}
+
 /** Sentencias que llevan la tabla de `structure` a `design`; [] si no hay cambios. Lanza si el diseño no es válido. */
 export function buildAlterStatements(engine: Engine, ref: TableRef, structure: TableStructure, design: TableDesign): string[] {
   const issues = validateDesign(engine, structure, design)
@@ -349,5 +431,12 @@ export function buildAlterStatements(engine: Engine, ref: TableRef, structure: T
   }
   const d = diffDesign(structure, design)
   if (!hasDesignChanges(d)) return []
-  return engine === 'mysql' ? mysqlStatements(ref, d) : mssqlStatements(ref, d, structure)
+  switch (engine) {
+    case 'mysql':
+      return mysqlStatements(ref, d)
+    case 'mssql':
+      return mssqlStatements(ref, d, structure)
+    case 'postgres':
+      return pgStatements(ref, d)
+  }
 }

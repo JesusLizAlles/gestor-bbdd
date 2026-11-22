@@ -23,8 +23,17 @@ const TYPES: Record<Engine, string[]> = {
     'int', 'bigint', 'smallint', 'tinyint', 'bit', 'decimal(18,2)', 'numeric(18,2)', 'money', 'float', 'real', 'nvarchar(255)',
     'nvarchar(max)', 'varchar(255)', 'varchar(max)', 'nchar(10)', 'char(10)', 'date', 'datetime2', 'datetime', 'smalldatetime', 'time',
     'datetimeoffset', 'uniqueidentifier', 'varbinary(max)', 'xml'
+  ],
+  postgres: [
+    'integer', 'bigint', 'smallint', 'numeric(12,2)', 'double precision', 'real', 'boolean', 'text', 'varchar(255)', 'char(10)',
+    'date', 'timestamp', 'timestamptz', 'time', 'interval', 'uuid', 'jsonb', 'json', 'bytea', 'inet', 'text[]', 'integer[]'
   ]
 }
+
+/** Tipo de las columnas nuevas. */
+const NEW_COLUMN_TYPE: Record<Engine, string> = { mysql: 'varchar(255)', mssql: 'nvarchar(255)', postgres: 'text' }
+/** Los motores con comentarios de columna. */
+const HAS_COMMENTS: Record<Engine, boolean> = { mysql: true, mssql: false, postgres: true }
 
 /** Diseño en edición: lo borrado se queda en la lista (tachado, se puede restaurar) hasta aplicar. */
 interface Draft {
@@ -108,7 +117,7 @@ export function StructureView(props: Props) {
     const column: ColumnDesign = {
       original: null,
       name: `columna${n}`,
-      dataType: engine === 'mysql' ? 'varchar(255)' : 'nvarchar(255)',
+      dataType: NEW_COLUMN_TYPE[engine],
       nullable: true,
       defaultValue: null,
       autoIncrement: false,
@@ -272,7 +281,7 @@ export function StructureView(props: Props) {
               <th className="center" title={engine === 'mysql' ? 'AUTO_INCREMENT' : 'IDENTITY'}>
                 Auto
               </th>
-              {engine === 'mysql' && <th>Comentario</th>}
+              {HAS_COMMENTS[engine] && <th>Comentario</th>}
               {canEdit && <th />}
             </tr>
           </thead>
@@ -362,7 +371,7 @@ export function StructureView(props: Props) {
                       onChange={(e) => setColumn(i, { autoIncrement: e.target.checked })}
                     />
                   </td>
-                  {engine === 'mysql' && (
+                  {HAS_COMMENTS[engine] && (
                     <td className={changed('comment') ? 'changed' : ''}>
                       <input
                         className="cell-input plain"
@@ -411,7 +420,7 @@ export function StructureView(props: Props) {
           <tbody>
             {diff.newPk.length > 0 && (
               <tr className={diff.pkChanged ? 'row-changed' : ''}>
-                <td className="mono pk-name">{primary?.name ?? (engine === 'mysql' ? 'PRIMARY' : `PK_${tableRef.table}`)}</td>
+                <td className="mono pk-name">{primary?.name ?? (engine === 'mysql' ? 'PRIMARY' : engine === 'postgres' ? `${tableRef.table}_pkey` : `PK_${tableRef.table}`)}</td>
                 <td className="pk-name">
                   <span className={`mono ${diff.pkChanged ? 'changed-text' : ''}`}>{diff.newPk.join(', ')}</span>
                   <span className="note"> · clave primaria{canEdit && ', se cambia con 🔑 en las columnas'}</span>
@@ -542,14 +551,14 @@ export function StructureView(props: Props) {
             onKeyDown={(e) => e.key === 'Escape' && !review.applying && setReview(null)}
           >
             <h2>
-              Modificar {tableRef.schema && engine === 'mssql' ? `${tableRef.schema}.` : ''}
+              Modificar {tableRef.schema && engine !== 'mysql' ? `${tableRef.schema}.` : ''}
               {tableRef.table}
             </h2>
             <div className="body">
               {review.error && <div className="notice error">{review.error}</div>}
               {prod && <div className="notice error">Conexión de producción: revisa bien el SQL antes de aplicarlo.</div>}
               <p className="note">
-                {engine === 'mssql'
+                {engine !== 'mysql'
                   ? 'Se aplica todo en una transacción: si una sentencia falla, no se cambia nada.'
                   : review.statements.length > 1
                     ? 'MySQL no deshace los cambios de estructura: si una sentencia falla, las anteriores se quedan aplicadas.'

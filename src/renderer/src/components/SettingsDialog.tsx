@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ConnectionSummary, McpAccess, McpActivity, McpSettings, McpState } from '@shared/types'
+import { ENGINE_LABELS } from '@shared/types'
 
 const ACCESS_OPTIONS: { value: McpAccess; label: string }[] = [
   { value: 'off', label: 'Sin acceso' },
@@ -170,7 +171,7 @@ export function SettingsDialog({ connections, onClose }: { connections: Connecti
                     <span className="mcp-conn-name">{c.name}</span>
                     {c.environment === 'prod' && <span className="badge prod">PROD</span>}
                     {c.readOnly && <span className="badge ro">RO</span>}
-                    <span className="badge">{c.engine === 'mysql' ? 'MySQL' : 'MSSQL'}</span>
+                    <span className="badge">{ENGINE_LABELS[c.engine]}</span>
                     <span className="spacer" />
                     {limit && <span className="note">Se queda en menos: {limit}</span>}
                     <select

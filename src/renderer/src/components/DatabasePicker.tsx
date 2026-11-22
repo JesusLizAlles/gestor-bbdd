@@ -5,7 +5,9 @@ import type { Engine } from '@shared/types'
 /** Bases de datos del propio servidor: se marcan y se pueden ocultar de una vez. */
 const SYSTEM_DATABASES: Record<Engine, string[]> = {
   mysql: ['information_schema', 'mysql', 'performance_schema', 'sys'],
-  mssql: ['master', 'model', 'msdb', 'tempdb']
+  mssql: ['master', 'model', 'msdb', 'tempdb'],
+  // template0 y template1 no salen en la lista (no admiten conexiones o son plantillas).
+  postgres: ['postgres']
 }
 
 interface Props {

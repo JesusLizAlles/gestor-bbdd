@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { ConnectionSummary, Engine, Environment, ImportPreview, ImportResult } from '@shared/types'
+import { ENGINE_LABELS } from '@shared/types'
 
 const MIN_PASSPHRASE = 8
 
@@ -34,7 +35,7 @@ function ConnectionChecklist({ items, selected, onChange }: { items: Item[]; sel
           <span className="transfer-name">{i.name}</span>
           <span className="transfer-host">{i.host}</span>
           {i.tag && <span className="badge">{i.tag}</span>}
-          <span className="badge">{i.engine === 'mysql' ? 'MySQL' : 'MSSQL'}</span>
+          <span className="badge">{ENGINE_LABELS[i.engine]}</span>
         </label>
       ))}
     </div>

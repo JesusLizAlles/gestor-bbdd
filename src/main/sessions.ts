@@ -38,6 +38,7 @@ import {
   type ParamStatement
 } from '@shared/table-query'
 import { buildAlterStatements, structureSignature } from '@shared/table-ddl'
+import { usesDatabaseInNames } from '@shared/format'
 import type { DriverFactory } from './drivers'
 import { DdlError } from './drivers/errors'
 import type { DbDriver } from './drivers/types'
@@ -58,6 +59,8 @@ interface Session {
   queue: Promise<void>
   /** Columnas por tabla, para validar el orden y paginar por clave primaria. */
   columns: Map<string, ColumnInfo[]>
+  /** Base de datos en la que se abrió la conexión (la de las consolas sin base de datos en PostgreSQL). */
+  defaultDatabase: string | null
 }
 
 const changedError = (): Error =>
@@ -90,7 +93,8 @@ export class SessionManager {
       running: false,
       broken: null,
       queue: Promise.resolve(),
-      columns: new Map()
+      columns: new Map(),
+      defaultDatabase: server.currentDatabase
     }
     tunnel?.onUnexpectedClose((reason) => {
       session.broken = reason
@@ -168,9 +172,11 @@ export class SessionManager {
           })
           // El historial nunca debe hacer fallar una consulta.
           .catch(() => {})
-      if (input.database) {
+      // En PostgreSQL cada base de datos es una conexión: sin elegir ninguna se usa aquella con la que se abrió.
+      const database = input.database || (usesDatabaseInNames(config.engine) ? null : session.defaultDatabase)
+      if (database) {
         try {
-          await driver.useDatabase(input.database)
+          await driver.useDatabase(database)
         } catch (err) {
           await record(null, (err as Error).message)
           throw err
@@ -219,7 +225,7 @@ export class SessionManager {
       limit: input.limit
     })
     const started = performance.now()
-    const [result] = await this.exclusive(session, () => session.driver.execute(sql, { maxRows: input.limit + 1 }))
+    const [result] = await this.exclusive(session, () => this.onDatabase(session, ref, () => session.driver.execute(sql, { maxRows: input.limit + 1 })))
     // Solo se recuerdan los filtros que han funcionado.
     if (where) await this.deps.history?.addFilter(session.config.id, ref, where).catch(() => {})
     const rows = result?.rows ?? []
@@ -235,7 +241,7 @@ export class SessionManager {
   async countTableRows(sessionId: string, input: TableRef & { where?: string }): Promise<number> {
     const session = this.get(sessionId)
     const sql = buildCountQuery(session.config.engine, input, validateWhere(input.where, session.config.engine))
-    const [result] = await this.exclusive(session, () => session.driver.execute(sql, { maxRows: 1 }))
+    const [result] = await this.exclusive(session, () => this.onDatabase(session, input, () => session.driver.execute(sql, { maxRows: 1 })))
     return Number(result?.rows[0]?.[0] ?? 0)
   }
 
@@ -317,7 +323,7 @@ export class SessionManager {
       ...updates.map((u) => numbered(buildUpdate(engine, ref, u, paramIndex))),
       ...inserts.map((set, i) => numbered(buildInsert(engine, ref, set, paramIndex, `la fila nueva ${i + 1}`)))
     ]
-    await this.exclusive(session, () => session.driver.executeChanges(statements))
+    await this.exclusive(session, () => this.onDatabase(session, ref, () => session.driver.executeChanges(statements)))
     return { updated: updates.length, inserted: inserts.length, deleted: deletes.length }
   }
 
@@ -339,7 +345,7 @@ export class SessionManager {
     const total = statements.length
     if (total === 0) return { executed: 0, total }
     try {
-      return { executed: await this.exclusive(session, () => session.driver.executeDdl(statements)), total }
+      return { executed: await this.exclusive(session, () => this.onDatabase(session, ref, () => session.driver.executeDdl(statements))), total }
     } catch (err) {
       return { executed: err instanceof DdlError ? err.applied : 0, total, error: (err as Error).message }
     } finally {
@@ -374,6 +380,15 @@ export class SessionManager {
       session.columns.set(key, columns)
     }
     return columns
+  }
+
+  /**
+   * El SQL del visor nombra la tabla con su base de datos, salvo en PostgreSQL: ahí la conexión de
+   * consultas se cambia antes a la base de datos de la tabla (las consolas vuelven a la suya al ejecutar).
+   */
+  private async onDatabase<T>(session: Session, ref: TableRef, task: () => Promise<T>): Promise<T> {
+    if (!usesDatabaseInNames(session.config.engine)) await session.driver.useDatabase(ref.database)
+    return task()
   }
 
   /** Serializa el uso de la conexión de consultas: varias pestañas de la misma conexión esperan turno. */

@@ -9,6 +9,8 @@ import type {
   TableInfo,
   TableRef
 } from '@shared/types'
+import { ENGINE_LABELS } from '@shared/types'
+import { tableLabel } from '@shared/format'
 import { ExportDialog, ImportDialog } from './components/ConfigTransfer'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import { ConnectionDialog } from './components/ConnectionDialog'
@@ -44,7 +46,7 @@ function readSidebarWidth(): number {
   }
 }
 
-const tabLabel = (ref: TableRef) => (ref.schema && ref.schema !== 'dbo' ? `${ref.schema}.${ref.table}` : ref.table)
+const tabLabel = (ref: TableRef) => tableLabel(ref.schema, ref.table)
 
 export function App() {
   const [connections, setConnections] = useState<ConnectionSummary[]>([])
@@ -303,7 +305,7 @@ export function App() {
                   <span className="name">{c.name}</span>
                   {c.ssh.enabled && <span className="badge">SSH</span>}
                   {c.readOnly && <span className="badge ro">RO</span>}
-                  <span className="badge">{c.engine === 'mysql' ? 'MySQL' : 'MSSQL'}</span>
+                  <span className="badge">{ENGINE_LABELS[c.engine]}</span>
                   <span className="actions" onClick={(e) => e.stopPropagation()}>
                     {session ? (
                       <>
@@ -423,7 +425,7 @@ export function App() {
             <h1>Gestor BBDD</h1>
             {sessions.length === 0 ? (
               <>
-                <div>MySQL / MariaDB y SQL Server · conexión directa, TLS o túnel SSH</div>
+                <div>MySQL / MariaDB, SQL Server y PostgreSQL · conexión directa, TLS o túnel SSH</div>
                 <div className="note">Pulsa una conexión para ver sus bases de datos.</div>
                 <button className="primary" onClick={() => setEditing('new')}>
                   Nueva conexión

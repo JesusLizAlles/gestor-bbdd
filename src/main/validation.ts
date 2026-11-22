@@ -13,7 +13,7 @@ const optionalText = z
 export const connectionConfigSchema = z.object({
   id: z.string().uuid().optional(),
   name: nonEmpty,
-  engine: z.enum(['mysql', 'mssql']),
+  engine: z.enum(['mysql', 'mssql', 'postgres']),
   host: nonEmpty,
   port,
   username: z.string().max(255),

@@ -1,7 +1,7 @@
 // Tipos compartidos entre el proceso principal, el preload y la interfaz.
 // Nada de lo que hay aquí contiene secretos: las contraseñas nunca viajan al renderer.
 
-export type Engine = 'mysql' | 'mssql'
+export type Engine = 'mysql' | 'mssql' | 'postgres'
 
 export type Environment = 'dev' | 'test' | 'prod'
 
@@ -98,9 +98,9 @@ export interface ColumnInfo {
   nullable: boolean
   isPrimaryKey: boolean
   defaultValue: string | null
-  /** AUTO_INCREMENT (MySQL) o IDENTITY (SQL Server): el servidor pone el valor al insertar. */
+  /** AUTO_INCREMENT (MySQL) o IDENTITY (SQL Server, PostgreSQL): el servidor pone el valor al insertar. */
   autoIncrement: boolean
-  /** Comentario de la columna (solo MySQL). */
+  /** Comentario de la columna (MySQL y PostgreSQL). */
   comment?: string | null
   /** Intercalación de las columnas de texto: se conserva al modificarlas. */
   collation?: string | null
@@ -194,7 +194,7 @@ export interface IndexInfo {
   columns: string[]
   unique: boolean
   primary: boolean
-  /** SQL Server: UNIQUE creado como restricción (se quita con DROP CONSTRAINT, no DROP INDEX). */
+  /** SQL Server y PostgreSQL: UNIQUE creado como restricción (se quita con DROP CONSTRAINT, no DROP INDEX). */
   uniqueConstraint?: boolean
 }
 
@@ -212,7 +212,7 @@ export interface TableStructure {
   columns: ColumnInfo[]
   indexes: IndexInfo[]
   foreignKeys: ForeignKeyInfo[]
-  /** Sentencia CREATE si el motor la ofrece (MySQL siempre; SQL Server solo vistas). */
+  /** Sentencia CREATE si el motor la ofrece (MySQL y PostgreSQL siempre; SQL Server solo vistas). */
   ddl: string | null
 }
 
@@ -258,7 +258,7 @@ export interface ColumnDesign {
   defaultValue: string | null
   autoIncrement: boolean
   primaryKey: boolean
-  /** Solo MySQL. */
+  /** MySQL y PostgreSQL. */
   comment: string | null
 }
 
@@ -290,7 +290,7 @@ export interface AlterTableInput extends TableRef {
 }
 
 export interface AlterTableOutput {
-  /** Sentencias aplicadas. Si hubo error, las anteriores a la que falló (en MySQL no se deshacen). */
+  /** Sentencias aplicadas. Si hubo error, las anteriores a la que falló (en MySQL no se deshacen; en SQL Server y PostgreSQL, 0). */
   executed: number
   total: number
   error?: string
@@ -514,7 +514,13 @@ export const DEFAULT_MAX_ROWS = 500
 
 export const PAGE_SIZES = [100, 500, 1000, 5000]
 
-export const DEFAULT_PORTS: Record<Engine, number> = { mysql: 3306, mssql: 1433 }
+export const DEFAULT_PORTS: Record<Engine, number> = { mysql: 3306, mssql: 1433, postgres: 5432 }
+
+/** Nombre corto del motor para las etiquetas de la interfaz. */
+export const ENGINE_LABELS: Record<Engine, string> = { mysql: 'MySQL', mssql: 'MSSQL', postgres: 'PostgreSQL' }
+
+/** Esquema por defecto: no se muestra delante del nombre de la tabla. */
+export const DEFAULT_SCHEMA: Record<Engine, string | null> = { mysql: null, mssql: 'dbo', postgres: 'public' }
 
 export const DEFAULT_MCP_PORT = 47321
 export const DEFAULT_MCP_MAX_ROWS = 200
