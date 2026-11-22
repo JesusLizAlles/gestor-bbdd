@@ -1,7 +1,7 @@
 {
   "name": "gestor-bbdd",
   "productName": "Gestor BBDD",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Gestor de bases de datos ligero para MySQL/MariaDB, SQL Server y PostgreSQL con túneles SSH",
   "private": true,
   "type": "module",
